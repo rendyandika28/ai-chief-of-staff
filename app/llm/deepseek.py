@@ -2,8 +2,9 @@ from openai import OpenAI
 
 from app.config.settings import settings
 
+from app.llm.base import BaseLLM
 
-class LLM:
+class DeepSeekLLM(BaseLLM):
     def __init__(self):
         self.client = OpenAI(
             api_key=settings.DEEPSEEK_API_KEY,

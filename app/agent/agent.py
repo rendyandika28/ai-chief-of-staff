@@ -1,10 +1,7 @@
-from app.llm.deepseek import LLM
-
-
 class Agent:
-    def __init__(self):
+    def __init__(self, llm):
         self.name = "Chief of Staff"
-        self.llm = LLM()
+        self.llm = llm
 
     def chat(self, message: str) -> str:
         print(f"[Agent] Received: {message}")

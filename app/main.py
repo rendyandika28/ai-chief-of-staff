@@ -1,10 +1,11 @@
 from app.agent.agent import Agent
-
+from app.llm.factory import create_llm
 
 def main():
-    agent = Agent()
+    llm = create_llm()
+    agent = Agent(llm)
 
-    response = agent.chat("Perkenalkan diri kamu dalam 10 kata.")
+    response = agent.chat("Perkenalkan diri kamu dalam 1 kata.")
 
     print(response)
 
