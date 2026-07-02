@@ -43,7 +43,7 @@ class Planner:
         messages = self.builder.build(
             system_prompt=prompt,
             profile=self.profile.load(),
-            history=history[-6:],  # only last 6 messages to prevent context bleed
+            history=history,  # only last 6 messages to prevent context bleed
             message=message,
         )
         raw = self.llm.chat(messages)
@@ -73,7 +73,7 @@ class Executor:
         messages = self.builder.build(
             system_prompt=self._prompt,
             profile=self.profile.load(),
-            history=history[-6:],
+            history=history,
             message=summary_msg,
         )
         raw = self.llm.chat(messages)
@@ -93,7 +93,7 @@ class Executor:
         messages = self.builder.build(
             system_prompt=self._prompt,
             profile=self.profile.load(),
-            history=history[-6:],
+            history=history,
             message=summary_msg,
         )
         for token in self.llm.stream(messages, max_tokens=1024):
@@ -178,9 +178,12 @@ class Agent:
             return "Maaf, ada error internal."
 
     def _do_chat(self, user_id: str, message: str) -> str:
-        history = self.memory.get(user_id)
+        history = self.memory.get(user_id) or []
         # Filter out fallback responses from history — they confuse the LLM
         history = [h for h in history if "kesulitan memproses" not in h.get("content", "")]
+
+        # Short history window to prevent context bleed
+        history = history[-6:]
 
         # Context compression: if history > 15, compress oldest messages into a summary
         if len(history) > 15:
@@ -203,14 +206,15 @@ class Agent:
                 memories.insert(0, {"user": "", "assistant": kg})
 
         for _ in range(MAX_ITERATIONS):
-            data = self.planner.plan(message, history[-6:], feedback, memories)
+            data = self.planner.plan(message, history, feedback, memories)
             if data is None:
                 return last_response
 
     def _do_chat_stream(self, user_id: str, message: str):
         """Streaming version — live typing. Simpler: no reflection loop, single pass."""
-        history = self.memory.get(user_id)
+        history = self.memory.get(user_id) or []
         history = [h for h in history if "kesulitan memproses" not in h.get("content", "")]
+        history = history[-6:]
 
         if len(history) > 15:
             compressed = self._compress_history(history)
@@ -226,7 +230,7 @@ class Agent:
                 memories.insert(0, {"user": "", "assistant": kg})
 
         # Plan (non-streaming — we need complete JSON)
-        data = self.planner.plan(message, history[-6:], "", memories)
+        data = self.planner.plan(message, history, "", memories)
         if data is None:
             yield "Maaf, aku kesulitan memproses permintaan itu."
             return
