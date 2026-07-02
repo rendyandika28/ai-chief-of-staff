@@ -43,8 +43,8 @@ class Planner:
         messages = self.builder.build(
             system_prompt=prompt,
             profile=self.profile.load(),
-            history=history,
-            message="[RESPOND WITH JSON ONLY]\n\n" + message,
+            history=history[-6:],  # only last 6 messages to prevent context bleed
+            message=message,
         )
         raw = self.llm.chat(messages)
         data = extract_json(raw)
@@ -73,7 +73,7 @@ class Executor:
         messages = self.builder.build(
             system_prompt=self._prompt,
             profile=self.profile.load(),
-            history=history,
+            history=history[-6:],
             message=summary_msg,
         )
         raw = self.llm.chat(messages)
@@ -93,7 +93,7 @@ class Executor:
         messages = self.builder.build(
             system_prompt=self._prompt,
             profile=self.profile.load(),
-            history=history,
+            history=history[-6:],
             message=summary_msg,
         )
         for token in self.llm.stream(messages, max_tokens=1024):
@@ -203,7 +203,7 @@ class Agent:
                 memories.insert(0, {"user": "", "assistant": kg})
 
         for _ in range(MAX_ITERATIONS):
-            data = self.planner.plan(message, history, feedback, memories)
+            data = self.planner.plan(message, history[-6:], feedback, memories)
             if data is None:
                 return last_response
 
@@ -226,7 +226,7 @@ class Agent:
                 memories.insert(0, {"user": "", "assistant": kg})
 
         # Plan (non-streaming — we need complete JSON)
-        data = self.planner.plan(message, history, "", memories)
+        data = self.planner.plan(message, history[-6:], "", memories)
         if data is None:
             yield "Maaf, aku kesulitan memproses permintaan itu."
             return
