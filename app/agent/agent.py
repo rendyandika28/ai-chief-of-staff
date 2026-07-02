@@ -51,9 +51,12 @@ class Planner:
             message=message,
         )
         raw = self.llm.chat(messages)
+        # Strip markdown fences if Claude wraps JSON
+        raw = raw.strip()
+        if "```" in raw:
+            raw = re.sub(r'```(?:json)?\s*', '', raw).strip()
         data = extract_json(raw)
         if data is None or validate(data, self._tool_exists) is not None:
-            # Accept natural language as chat
             logger.info(f"Planner natural language: {raw[:100]}")
             return {"action": "chat", "message": raw.strip()}
         return data
