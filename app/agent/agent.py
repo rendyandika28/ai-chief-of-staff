@@ -157,6 +157,14 @@ class Agent:
         history = self.memory.get(user_id)
         # Filter out fallback responses from history — they confuse the LLM
         history = [h for h in history if "kesulitan memproses" not in h.get("content", "")]
+
+        # Context compression: if history > 15, compress oldest messages into a summary
+        if len(history) > 15:
+            compressed = self._compress_history(history)
+            history = [
+                {"role": "system", "content": f"Ringkasan percakapan sebelumnya:\n{compressed}"}
+            ] + history[-10:]
+
         feedback = ""
         last_response = "Maaf, aku kesulitan memproses permintaan itu."
 
@@ -174,6 +182,44 @@ class Agent:
             data = self.planner.plan(message, history, feedback, memories)
             if data is None:
                 return last_response
+
+    def _compress_history(self, history: list) -> str:
+        """Summarize old messages to keep conversation context compact."""
+        try:
+            lines = "\n".join(f"{h['role']}: {h['content'][:200]}" for h in history[:-10])
+            msg = [
+                {"role": "system", "content": "Ringkas percakapan ini dalam 2-3 kalimat pendek. Fokus ke topik, keputusan, dan fakta penting. Bahasa Indonesia."},
+                {"role": "user", "content": lines},
+            ]
+            return self.reflector.llm.chat(msg, max_tokens=200)
+        except Exception:
+            return ""
+
+    def _extract_facts(self, user_id: str, message: str, response: str):
+        """Extract 1-3 key facts from conversation. Best-effort, never blocks."""
+        if not self.knowledge_graph or len(message) < 10:
+            return
+        try:
+            prompt = (
+                "Extract 1-3 facts from this chat as JSON array. "
+                'Format: [{"subject":"Rendy","predicate":"works_at","object":"PT X"}]. '
+                "Predicates in snake_case. Only extract if explicit. "
+                'If nothing important, return [].'
+            )
+            msg = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"User: {message}\nAssistant: {response}"},
+            ]
+            raw = self.reflector.llm.chat(msg, max_tokens=300)
+            facts = extract_json(raw)
+            if isinstance(facts, list):
+                for f in facts[:3]:
+                    if all(k in f for k in ("subject", "predicate", "object")):
+                        self.knowledge_graph.upsert(
+                            user_id, f["subject"], f["predicate"], f["object"], 0.7
+                        )
+        except Exception:
+            pass
 
             if data["action"] == "chat":
                 response = data["message"]
@@ -205,6 +251,7 @@ class Agent:
             if verdict["verdict"] == "good":
                 if self.long_term:
                     self.long_term.add(user_id, message, response)
+                self._extract_facts(user_id, message, response)
                 return response
 
             feedback = verdict["feedback"]
