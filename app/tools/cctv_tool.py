@@ -1,7 +1,6 @@
 import json
 import math
 import os
-import subprocess
 import time
 import urllib.request
 import urllib.parse
@@ -202,41 +201,15 @@ class CctvTool(Tool):
 
         lines = [f"Camera: {name}", f"Area: {area}"]
 
-        video_path = self._capture_video(stream_url, name)
-        if video_path:
-            lines.append(f"[VIDEO:{video_path}]")
-        else:
-            imgs = self._capture_frames(stream_url) if self._browser else []
-            for p in imgs:
-                lines.append(f"[IMAGE:{p}]")
+        imgs = self._capture_frames(stream_url, name) if self._browser else []
+        for p in imgs:
+            lines.append(f"[IMAGE:{p}]")
 
         return "\n".join(lines)
 
-    def _capture_video(self, stream_url: str, name: str) -> str:
-        slug = name.lower().replace(" ", "_")[:20]
-        out = f"memory/cctv_{slug}.mp4"
-        os.makedirs("memory", exist_ok=True)
-
-        # Try 1: ffmpeg with browser headers — raw stream, no re-encode
-        try:
-            subprocess.run(
-                ["ffmpeg", "-y",
-                 "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://cctv.jogjakota.go.id/\r\n",
-                 "-i", stream_url, "-t", "10", "-c", "copy", "-loglevel", "error", out],
-                timeout=20, capture_output=True,
-            )
-            if os.path.exists(out) and os.path.getsize(out) > 1000:
-                return out
-        except Exception:
-            pass
-
-        # Try 2: browser frame capture → ffmpeg combine (fallback)
-        if self._browser is None:
-            return ""
-
-        frame_dir = f"memory/frames_{slug}"
-        os.makedirs(frame_dir, exist_ok=True)
-
+    def _capture_frames(self, stream_url: str, name: str) -> list:
+        """Take 4 screenshots across 10 seconds from the HLS player."""
+        paths = []
         try:
             html = (
                 "<html><head>"
@@ -259,27 +232,13 @@ class CctvTool(Tool):
             self._browser.run(f"navigate:file://{tmp_path}")
             time.sleep(3)
 
-            for i in range(20):
-                time.sleep(0.5)
+            for _ in range(4):
+                time.sleep(2.5)
                 result = self._browser.run("screenshot")
                 if "Screenshot saved:" in result:
-                    src = result.split("Screenshot saved:")[1].strip()
-                    dst = f"{frame_dir}/frame_{i:04d}.png"
-                    if os.path.exists(src):
-                        os.rename(src, dst)
+                    paths.append(result.split("Screenshot saved:")[1].strip())
 
             os.remove(tmp_path)
-
-            subprocess.run(
-                ["ffmpeg", "-y", "-framerate", "2", "-i", f"{frame_dir}/frame_%04d.png",
-                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-loglevel", "error", out],
-                timeout=30, capture_output=True,
-            )
-            import shutil
-            shutil.rmtree(frame_dir, ignore_errors=True)
-
-            if os.path.exists(out) and os.path.getsize(out) > 1000:
-                return out
         except Exception:
             pass
-        return ""
+        return paths
