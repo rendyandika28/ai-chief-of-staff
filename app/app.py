@@ -67,4 +67,41 @@ def create_core():
 
     watchers.register(job_scraper, 21600)  # every 6 hours
 
+    # Health coach watchers
+    def posture_reminder():
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone(timedelta(hours=7)))
+        h = now.hour
+        # 9am-10pm, every 2 hours (9, 11, 13, 15, 17, 19, 21)
+        if 9 <= h <= 21 and h % 2 == 1:
+            return "🧘 Udah 2 jam bro. Berdiri dulu, stretching 2 menit. Jangan lupa minum air putih!"
+        return None
+
+    watchers.register(posture_reminder, 3600)  # hourly
+
+    def evening_wind_down():
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone(timedelta(hours=7)))
+        if now.hour == 22 and now.minute < 5:
+            knowledge_graph.upsert("system", "Rendy", "bedtime_reminder", now.strftime("%Y-%m-%d"), 0.5)
+            return "🌙 Jam 10 malem bro. Matiin laptop, jangan begadang. Besok pagi lo bakal berterima kasih sama gue."
+        return None
+
+    watchers.register(evening_wind_down, 3600)
+
+    def morning_health_check():
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone(timedelta(hours=7)))
+        if now.hour == 8 and now.minute < 10:
+            knowledge_graph.cleanup()
+            return (
+                "☀️ Selamat pagi! Udah bangun?\n"
+                "Gimana tidur lo tadi malem? (1-10)\n"
+                "Ada yang sakit atau butuh diurus hari ini?\n"
+                "Jangan lupa sarapan ya — protein + serat, jangan cuma kopi doang."
+            )
+        return None
+
+    watchers.register(morning_health_check, 600)  # check every 10 min
+
     return agent, memory, scheduler, event_bus, goal_manager, watchers
