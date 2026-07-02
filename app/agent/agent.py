@@ -78,10 +78,17 @@ class Planner:
                     data = None
 
         if data is None or validate(data, self._tool_exists) is not None:
-            # Strip any JSON residue from raw before using as chat
-            clean = re.sub(r'\{.*?\}', '', raw).strip()
-            logger.info(f"Planner natural language: {clean[:100]}")
-            return {"action": "chat", "message": clean if clean else raw.strip()}
+            # Auto-correct: if action field is a known tool name, convert
+            if data and data.get("action") and self._tool_exists(data["action"]):
+                data = {
+                    "action": "tool",
+                    "tool": data["action"],
+                    "input": data.get("input", data.get("command", "")),
+                }
+            else:
+                clean = re.sub(r'\{.*?\}', '', raw).strip()
+                logger.info(f"Planner natural language: {clean[:100]}")
+                return {"action": "chat", "message": clean if clean else raw.strip()}
         return data
 
 
