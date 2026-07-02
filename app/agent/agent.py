@@ -177,13 +177,18 @@ class Agent:
                 response = data["message"]
             else:
                 tool_results = self._execute_tools(data, user_id)
-                response = self.executor.respond(message, history, tool_results)
-                if response is None:
+                # Visual tools: skip Executor LLM, return raw tool output directly
+                tool_name = data.get("tool", "")
+                if tool_name in ("cctv", "traffic", "browser"):
                     response = tool_results
-                # Preserve [IMAGE:path] markers from tool results
-                images = re.findall(r'\[IMAGE:.*?\]', tool_results)
-                if images:
-                    response += "\n" + "\n".join(images)
+                else:
+                    response = self.executor.respond(message, history, tool_results)
+                    if response is None:
+                        response = tool_results
+                    # Preserve [IMAGE/VIDEO] markers from tool results
+                    markers = re.findall(r'\[(?:IMAGE|VIDEO):.*?\]', tool_results)
+                    if markers:
+                        response += "\n" + "\n".join(markers)
 
             last_response = response
 

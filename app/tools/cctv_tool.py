@@ -11,6 +11,7 @@ CCTV_API = "https://cctv.jogjakota.go.id/home/getdata"
 CCTV_MAP = "https://cctv.jogjakota.go.id"
 
 CAMERA_CACHE = None
+GEOCODE_CACHE = {}
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -105,7 +106,10 @@ class CctvTool(Tool):
         return active[:limit]
 
     def _geocode(self, location: str):
-        """Geocode a location name to lat/lng using Nominatim."""
+        """Geocode a location name to lat/lng using Nominatim. Results cached."""
+        if location in GEOCODE_CACHE:
+            return GEOCODE_CACHE[location]
+
         try:
             url = (
                 "https://nominatim.openstreetmap.org/search?"
@@ -115,9 +119,12 @@ class CctvTool(Tool):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if data:
-                return float(data[0]["lat"]), float(data[0]["lon"])
+                result = (float(data[0]["lat"]), float(data[0]["lon"]))
+                GEOCODE_CACHE[location] = result
+                return result
         except Exception:
             pass
+        GEOCODE_CACHE[location] = (None, None)
         return None, None
 
     def _list_cameras(self, cameras, query):
@@ -216,7 +223,7 @@ class CctvTool(Tool):
             subprocess.run(
                 ["ffmpeg", "-y", "-i", stream_url, "-t", "10", "-c", "copy",
                  "-loglevel", "error", out],
-                timeout=30, capture_output=True,
+                timeout=15, capture_output=True,
             )
             if os.path.exists(out) and os.path.getsize(out) > 1000:
                 return out
