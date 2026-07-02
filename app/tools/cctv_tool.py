@@ -213,13 +213,28 @@ class CctvTool(Tool):
         return "\n".join(lines)
 
     def _capture_video(self, stream_url: str, name: str) -> str:
-        """Capture frames via browser, combine into mp4 via ffmpeg."""
+        slug = name.lower().replace(" ", "_")[:20]
+        out = f"memory/cctv_{slug}.mp4"
+        os.makedirs("memory", exist_ok=True)
+
+        # Try 1: ffmpeg with browser headers — raw stream, no re-encode
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y",
+                 "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://cctv.jogjakota.go.id/\r\n",
+                 "-i", stream_url, "-t", "10", "-c", "copy", "-loglevel", "error", out],
+                timeout=20, capture_output=True,
+            )
+            if os.path.exists(out) and os.path.getsize(out) > 1000:
+                return out
+        except Exception:
+            pass
+
+        # Try 2: browser frame capture → ffmpeg combine (fallback)
         if self._browser is None:
             return ""
 
-        slug = name.lower().replace(" ", "_")[:20]
         frame_dir = f"memory/frames_{slug}"
-        out = f"memory/cctv_{slug}.mp4"
         os.makedirs(frame_dir, exist_ok=True)
 
         try:
@@ -244,7 +259,6 @@ class CctvTool(Tool):
             self._browser.run(f"navigate:file://{tmp_path}")
             time.sleep(3)
 
-            # Capture 20 frames in 10 seconds (2 fps)
             for i in range(20):
                 time.sleep(0.5)
                 result = self._browser.run("screenshot")
@@ -256,14 +270,11 @@ class CctvTool(Tool):
 
             os.remove(tmp_path)
 
-            # Combine frames into video via ffmpeg
             subprocess.run(
                 ["ffmpeg", "-y", "-framerate", "2", "-i", f"{frame_dir}/frame_%04d.png",
                  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-loglevel", "error", out],
                 timeout=30, capture_output=True,
             )
-
-            # Cleanup frames
             import shutil
             shutil.rmtree(frame_dir, ignore_errors=True)
 
