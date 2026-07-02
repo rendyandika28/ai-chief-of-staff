@@ -1,3 +1,5 @@
+"""Job search tool — scrapes Google Jobs via Playwright, saves listings, supports detail view."""
+
 import json
 import re
 import urllib.request
@@ -5,9 +7,6 @@ import urllib.error
 from pathlib import Path
 
 from app.tools.base import Tool
-
-JOB_DB = Path("data/jobs.json")
-JOB_DB.parent.mkdir(parents=True, exist_ok=True)
 
 PLATFORMS = {
     "linkedin": "https://www.linkedin.com/jobs/search/?keywords={role}&location={loc}",
@@ -20,18 +19,29 @@ PLATFORMS = {
     "kalibrr": "https://www.kalibrr.com/id-ID/search?query={role}&location={loc}",
 }
 
+JOB_DB = Path("data/jobs.json")
+JOB_DB.parent.mkdir(parents=True, exist_ok=True)
+
 
 class JobHuntTool(Tool):
     name = "job_hunt"
     description = (
-        "Search jobs across platforms. Commands: "
-        "search:<role>|<location>, "
-        "detail:<index>, "
-        "saved — list saved jobs."
+        "Cari lowongan. Commands: search:<role>|<lokasi>, detail:<index>, saved, apply:<index>"
     )
 
     def __init__(self):
-        pass
+        self._playwright = None
+        self._browser = None
+
+    def _ensure_browser(self):
+        if self._playwright is None:
+            from playwright.sync_api import sync_playwright
+            self._playwright = sync_playwright().start()
+        if self._browser is None:
+            self._browser = self._playwright.chromium.launch(headless=True, args=[
+                "--no-sandbox", "--disable-setuid-sandbox"
+            ])
+        return self._browser
 
     def run(self, input: str = "", user_id: str = "") -> str:
         parts = input.strip().split(":", 1)
@@ -40,122 +50,126 @@ class JobHuntTool(Tool):
 
         if cmd == "search":
             return self._search(arg)
-
         if cmd == "detail":
             return self._detail(arg)
-
         if cmd == "saved":
             return self._saved()
+        return "Commands: search:<role>|<location>, detail:<index>, saved"
 
-        return (
-            "Commands:\n"
-            "  search:<role>|<location>  — search across platforms\n"
-            "  detail:<index>  — view saved job details\n"
-            "  saved  — list saved jobs\n\n"
-            f"Platforms: {', '.join(PLATFORMS.keys())}"
-        )
-
-    def _search(self, arg):
+    def _search(self, arg: str) -> str:
         role, _, location = arg.partition("|")
         role = role.strip()
         location = location.strip() or "Remote"
 
         if not role:
-            return "Error: role is required (e.g. search:frontend engineer|jakarta)"
+            return "Error: role required (contoh: search:frontend engineer|jakarta)"
 
         lines = [f"Lowongan '{role}' di '{location}':\n"]
 
+        # Scrape Google Jobs via Playwright
+        try:
+            listings = self._scrape_google(role, location)
+            if listings:
+                saved = self._save_jobs(listings)
+                lines.append(f"{len(saved)} lowongan ditemukan:\n")
+                for i, job in enumerate(saved[-15:]):
+                    idx = len(self._load_jobs()) - len(saved) + i
+                    comp = job.get("company", "?")
+                    loc = job.get("location", "")
+                    lines.append(f"  [{idx}] {job['title']} — {comp}" + (f" ({loc})" if loc else ""))
+            else:
+                lines.append("Tidak ada hasil scraping. Link alternatif:\n")
+        except Exception as e:
+            lines.append(f"Scraping error: {e}\nLink alternatif:\n")
+
+        # Add platform URLs as backup
         for platform, url_template in PLATFORMS.items():
             url = url_template.format(
                 role=urllib.request.quote(role),
                 loc=urllib.request.quote(location),
             )
-            lines.append(f"[{platform}] {url}")
-
-        lines.append("\nBuka link di atas untuk mencari lowongan.")
+            lines.append(f"  [{platform}] {url}")
 
         return "\n".join(lines)
 
-    def _parse_google_jobs(self, content):
+    def _scrape_google(self, role: str, location: str) -> list:
+        browser = self._ensure_browser()
+        page = browser.new_page()
+        page.set_viewport_size({"width": 1280, "height": 900})
+
+        try:
+            url = PLATFORMS["google"].format(
+                role=urllib.request.quote(role),
+                loc=urllib.request.quote(location),
+            )
+            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            import time; time.sleep(2)
+            content = page.inner_text("body")
+        finally:
+            page.close()
+
         jobs = []
-        # ponytail: loose regex parsing of Google Jobs result page
-        # Match job title + company patterns
-        pattern = re.compile(
-            r'<h3[^>]*>(.*?)</h3>.*?<[^>]+>(.*?)</(?:div|span)>',
-            re.DOTALL,
-        )
         seen = set()
-        for h3_match in re.finditer(r'<h3[^>]*>(.*?)</h3>', content, re.DOTALL):
-            title = re.sub(r'<[^>]+>', '', h3_match.group(1)).strip()
-            if not title or len(title) < 3 or len(title) > 100:
-                continue
-            if title.lower() in seen:
-                continue
-            seen.add(title.lower())
-            jobs.append({"title": title, "company": "", "location": ""})
-        return jobs
 
-    def _save_jobs(self, jobs):
-        existing = []
-        if JOB_DB.exists():
-            try:
-                existing = json.loads(JOB_DB.read_text())
-            except json.JSONDecodeError:
-                pass
+        # Parse Google Jobs listing format
+        for line in content.split("\n"):
+            line = line.strip()
+            if not line or len(line) < 5 or len(line) > 150:
+                continue
+            if line.lower() in seen:
+                continue
+            # Filter: titles usually 5-80 chars, contain job-related keywords
+            if any(w in line.lower() for w in ("engineer", "developer", "manager", "designer",
+                   "analyst", "lead", "senior", "junior", "staff", "frontend", "backend",
+                   "fullstack", "devops", "mobile", "data", "product", "software")):
+                seen.add(line.lower())
+                jobs.append({"title": line, "company": "", "location": location})
 
+        return jobs[:20]
+
+    def _load_jobs(self) -> list:
+        if not JOB_DB.exists():
+            return []
+        try:
+            return json.loads(JOB_DB.read_text())
+        except json.JSONDecodeError:
+            return []
+
+    def _save_jobs(self, jobs: list) -> list:
+        existing = self._load_jobs()
         next_id = len(existing)
         for job in jobs:
             existing.append({
                 "id": next_id,
-                "title": job["title"],
+                "title": job.get("title", ""),
                 "company": job.get("company", ""),
                 "location": job.get("location", ""),
             })
             next_id += 1
-
         JOB_DB.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
         return jobs
 
-    def _detail(self, arg):
+    def _detail(self, arg: str) -> str:
         try:
             idx = int(arg)
         except ValueError:
-            return f"Error: index must be a number (use 'saved' to list)"
-
-        if not JOB_DB.exists():
-            return "Belum ada lowongan tersimpan. Gunakan 'search' dulu."
-
-        try:
-            jobs = json.loads(JOB_DB.read_text())
-        except json.JSONDecodeError:
-            return "Error membaca data lowongan."
-
+            return "Error: index must be a number"
+        jobs = self._load_jobs()
         if idx < 0 or idx >= len(jobs):
-            return f"Index {idx} di luar range (0-{len(jobs)-1})"
-
-        job = jobs[idx]
+            return f"Index {idx} out of range (0-{len(jobs)-1})"
+        j = jobs[idx]
         return (
-            f"[{job['id']}] {job['title']}\n"
-            f"  Company: {job.get('company', '?')}\n"
-            f"  Location: {job.get('location', '?')}\n"
+            f"[{j['id']}] {j['title']}\n"
+            f"  Company: {j.get('company', '?')}\n"
+            f"  Location: {j.get('location', '?')}"
         )
 
-    def _saved(self):
-        if not JOB_DB.exists():
-            return "Belum ada lowongan tersimpan. Gunakan 'search:<role>|<location>'"
-
-        try:
-            jobs = json.loads(JOB_DB.read_text())
-        except json.JSONDecodeError:
-            return "Error membaca data lowongan."
-
+    def _saved(self) -> str:
+        jobs = self._load_jobs()
         if not jobs:
             return "Belum ada lowongan tersimpan."
-
         lines = [f"{len(jobs)} lowongan tersimpan:\n"]
-        for job in jobs[-20:]:
-            lines.append(
-                f"  [{job['id']}] {job['title']}"
-                + (f" — {job['company']}" if job.get('company') else "")
-            )
+        for j in jobs[-20:]:
+            comp = j.get("company", "?")
+            lines.append(f"  [{j['id']}] {j['title']}" + (f" — {comp}" if comp else ""))
         return "\n".join(lines)
