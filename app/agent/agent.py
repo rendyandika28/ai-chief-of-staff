@@ -28,7 +28,8 @@ class Planner:
              memories: Optional[list] = None) -> Optional[dict]:
         instructions = prompt_instructions(self.tools.describe())
         now = datetime.now()
-        prompt = self._prompt + f"\n\nHari ini: {now.strftime('%A, %d %B %Y, %H:%M')} WIB\n\n{instructions}"
+        date_info = f"\n\nHARI INI: {now.strftime('%A, %d %B %Y jam %H:%M WIB')}. Gunakan info ini untuk input tool yang butuh tanggal (reminder at:, dll)."
+        prompt = self._prompt + date_info + "\n\n" + instructions
 
         if memories:
             mem_text = "\n".join(
