@@ -1,7 +1,7 @@
 import asyncio
 import re
 
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.constants import ChatAction
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
@@ -49,13 +49,23 @@ class TelegramBot:
         if text:
             await update.message.reply_text(text)
 
+        valid_paths = []
         for path in image_paths:
             import os
             if os.path.exists(path):
-                try:
-                    await update.message.reply_photo(photo=open(path, 'rb'))
-                except Exception:
-                    pass
+                valid_paths.append(path)
+
+        if len(valid_paths) == 1:
+            try:
+                await update.message.reply_photo(photo=open(valid_paths[0], 'rb'))
+            except Exception:
+                pass
+        elif len(valid_paths) > 1:
+            try:
+                media = [InputMediaPhoto(media=open(p, 'rb')) for p in valid_paths]
+                await update.message.reply_media_group(media=media)
+            except Exception:
+                pass
 
     def _send_to_user(self, text: str):
         if self._app is None or self._user_id is None:

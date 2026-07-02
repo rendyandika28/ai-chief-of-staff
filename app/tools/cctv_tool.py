@@ -155,21 +155,22 @@ class CctvTool(Tool):
                 tmp_path = f.name
 
             self._browser.run(f"navigate:file://{tmp_path}")
-            import time
-            time.sleep(5)  # give stream time to load + render frames
-            result = self._browser.run("screenshot")
 
-            # Extract path from browser screenshot output: "Screenshot saved: memory/xxx.png"
-            img_path = ""
-            if "Screenshot saved:" in result:
-                img_path = result.split("Screenshot saved:")[1].strip()
+            import time
+            # Take 3 snapshots across 6 seconds to capture the video feed
+            img_paths = []
+            for _ in range(3):
+                time.sleep(2)
+                result = self._browser.run("screenshot")
+                if "Screenshot saved:" in result:
+                    img_paths.append(result.split("Screenshot saved:")[1].strip())
 
             lines = [
                 f"Camera: {name}",
                 f"Area: {area}",
             ]
-            if img_path:
-                lines.append(f"[IMAGE:{img_path}]")
+            for p in img_paths:
+                lines.append(f"[IMAGE:{p}]")
 
             return "\n".join(lines)
         except Exception as e:
