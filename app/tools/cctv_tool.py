@@ -213,28 +213,29 @@ class CctvTool(Tool):
         os.makedirs("memory", exist_ok=True)
 
         try:
-            # Try 1: stream copy (fast, no re-encode)
-            r = subprocess.run(
+            abs_out = os.path.abspath(out)
+            # Try 1: stream copy
+            subprocess.run(
                 ["ffmpeg", "-y",
                  "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://cctv.jogjakota.go.id/\r\n",
-                 "-i", stream_url, "-t", "10", "-c", "copy", "-loglevel", "warning", out],
-                timeout=20, capture_output=True,
+                 "-i", stream_url, "-t", "10", "-c", "copy", abs_out],
+                timeout=30, capture_output=True, check=True,
             )
-            if os.path.exists(out) and os.path.getsize(out) > 5000:
-                return out
+            if os.path.exists(abs_out) and os.path.getsize(abs_out) > 5000:
+                return abs_out
 
-            # Try 2: re-encode (slower, but compatible)
-            if os.path.exists(out):
-                os.remove(out)
+            # Try 2: re-encode fallback
+            if os.path.exists(abs_out):
+                os.remove(abs_out)
             subprocess.run(
                 ["ffmpeg", "-y",
                  "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://cctv.jogjakota.go.id/\r\n",
                  "-i", stream_url, "-t", "10", "-c:v", "libx264", "-c:a", "aac",
-                 "-pix_fmt", "yuv420p", "-loglevel", "warning", out],
-                timeout=30, capture_output=True,
+                 "-pix_fmt", "yuv420p", abs_out],
+                timeout=45, capture_output=True, check=True,
             )
-            if os.path.exists(out) and os.path.getsize(out) > 5000:
-                return out
+            if os.path.exists(abs_out) and os.path.getsize(abs_out) > 5000:
+                return abs_out
         except Exception:
             pass
         return ""
