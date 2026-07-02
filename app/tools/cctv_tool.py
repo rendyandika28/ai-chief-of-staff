@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import subprocess
 import urllib.request
 import urllib.parse
 
@@ -201,28 +202,25 @@ class CctvTool(Tool):
 
         lines = [f"Camera: {name}", f"Area: {area}"]
 
-        if self._browser and hasattr(self._browser, '_session'):
-            video = self._capture_video(stream_url, name)
-            if video:
-                lines.append(f"[VIDEO:{video}]")
+        video = self._capture_video(stream_url, name)
+        if video:
+            lines.append(f"[VIDEO:{video}]")
         return "\n".join(lines)
 
     def _capture_video(self, stream_url: str, name: str) -> str:
         slug = name.lower().replace(" ", "_")[:20]
         out = f"memory/cctv_{slug}.mp4"
+        os.makedirs("memory", exist_ok=True)
 
-        html = (
-            "<html><head>"
-            "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
-            "</head><body style='margin:0;background:red'>"
-            "<video id='v' autoplay muted playsinline style='width:100%;height:100vh'></video>"
-            "<script>"
-            "const v=document.getElementById('v');"
-            "v.addEventListener('loadeddata',()=>{setTimeout(()=>v.play(),2000)});"
-            "if(Hls.isSupported()){const h=new Hls();"
-            f"h.loadSource('{stream_url}');h.attachMedia(v);"
-            "h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}"
-            f"else{{v.src='{stream_url}';v.play();}}"
-            "</script></body></html>"
-        )
-        return self._browser._session.record_video(html, 16, out)
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y",
+                 "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://cctv.jogjakota.go.id/\r\n",
+                 "-i", stream_url, "-t", "10", "-c", "copy", "-loglevel", "error", out],
+                timeout=20, capture_output=True,
+            )
+            if os.path.exists(out) and os.path.getsize(out) > 1000:
+                return out
+        except Exception:
+            pass
+        return ""
