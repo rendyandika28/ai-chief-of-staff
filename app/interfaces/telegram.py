@@ -78,15 +78,17 @@ class TelegramBot:
                 pass
 
     def _send_to_user(self, text: str):
-        if self._app is None or self._user_id is None or self._loop is None:
+        if self._app is None or self._user_id is None:
+            print(f"[TELEGRAM] Cannot send: app={self._app is not None} user={self._user_id}", flush=True)
             return
         try:
+            print(f"[TELEGRAM] Sending to {self._user_id}: {text[:50]}", flush=True)
             asyncio.run_coroutine_threadsafe(
                 self._app.bot.send_message(chat_id=int(self._user_id), text=text),
                 self._loop,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[TELEGRAM] Send error: {e}", flush=True)
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
