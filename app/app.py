@@ -54,16 +54,13 @@ def create_core():
 
     watchers.register(morning_check, 3600)  # check hourly
 
-    # Daily job scraper (checks at 7-9 AM WIB, once per day)
+    # Job scraper — every 6 hours
     def job_scraper():
-        from datetime import datetime, timedelta, timezone
-        now = datetime.now(timezone(timedelta(hours=7)))
-        if 7 <= now.hour <= 9:
-            job_tool = agent.tools.get("job_hunt")
-            if job_tool:
-                return job_tool.run("diff:frontend engineer|remote") or None
+        job_tool = agent.tools.get("job_hunt")
+        if job_tool:
+            return job_tool.run("report:frontend engineer|remote") or None
         return None
 
-    watchers.register(job_scraper, 3600)  # check hourly
+    watchers.register(job_scraper, 21600)  # every 6 hours
 
     return agent, memory, scheduler, event_bus, goal_manager, watchers
