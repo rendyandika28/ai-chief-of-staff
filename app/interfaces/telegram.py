@@ -77,8 +77,6 @@ class TelegramBot:
             full_text = "Maaf, ada error. Coba lagi nanti."
         await sent_msg.edit_text(full_text or "Maaf, ada error. Coba lagi nanti.")
 
-        await sent_msg.edit_text(full_response or "Maaf, ada error. Coba lagi nanti.")
-
         # Store in memory — skip visual tool outputs and fallback
         if "kesulitan memproses" in full_text:
             return
