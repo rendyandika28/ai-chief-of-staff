@@ -153,6 +153,8 @@ class Agent:
 
     def _do_chat(self, user_id: str, message: str) -> str:
         history = self.memory.get(user_id)
+        # Filter out fallback responses from history — they confuse the LLM
+        history = [h for h in history if "kesulitan memproses" not in h.get("content", "")]
         feedback = ""
         last_response = "Maaf, aku kesulitan memproses permintaan itu."
 
