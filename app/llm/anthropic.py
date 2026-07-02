@@ -5,8 +5,9 @@ from app.config.settings import settings
 
 
 class ClaudeLLM:
-    def __init__(self):
+    def __init__(self, model: str = None):
         self.client = Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.model = model or settings.ANTHROPIC_MODEL
 
     def chat(self, messages: list, max_tokens: int = 4096) -> str:
         try:
@@ -18,7 +19,6 @@ class ClaudeLLM:
             raise
 
     def stream(self, messages: list, max_tokens: int = 4096):
-        """Yields text tokens from Claude streaming API."""
         try:
             kwargs = self._build_kwargs(messages, max_tokens)
             kwargs["stream"] = True
@@ -38,7 +38,7 @@ class ClaudeLLM:
             else:
                 chat_messages.append(m)
 
-        kwargs = {"model": settings.ANTHROPIC_MODEL, "max_tokens": max_tokens}
+        kwargs = {"model": self.model, "max_tokens": max_tokens}
         if system:
             kwargs["system"] = system
         kwargs["messages"] = chat_messages
@@ -49,6 +49,7 @@ class ClaudeLLM:
         for block in response.content:
             if hasattr(block, 'text'):
                 text = block.text
-                logging.info(f"Claude ok: {len(text)} chars, tokens in={response.usage.input_tokens} out={response.usage.output_tokens}")
+                logging.info(f"Claude({self.model[:12]}...): {len(text)} chars, "
+                           f"in={response.usage.input_tokens} out={response.usage.output_tokens}")
                 return text
         return ""

@@ -21,8 +21,11 @@ from app.llm.anthropic import ClaudeLLM
 def create_core():
     event_bus = EventBus()
 
-    llm = ClaudeLLM() if settings.LLM_PROVIDER == "anthropic" else DeepSeekLLM()
-    print(f"[APP] Using LLM: {type(llm).__name__} (provider={settings.LLM_PROVIDER})", flush=True)
+    # Haiku (fast/cheap) for planner + compression + facts
+    fast_llm = ClaudeLLM(model="claude-haiku-4-5-20251001")
+    # Sonnet (smart) for executor natural conversation
+    smart_llm = ClaudeLLM()
+
     memory = Memory()
     long_term = LongTermMemory()
     scheduler = Scheduler()
@@ -30,7 +33,7 @@ def create_core():
     knowledge_graph = KnowledgeGraph()
     goal_manager = GoalManager()
 
-    agent = Agent(llm, memory, scheduler, long_term, knowledge_graph)
+    agent = Agent(fast_llm, smart_llm, memory, scheduler, long_term, knowledge_graph)
 
     watchers = WatcherManager(event_bus)
 

@@ -87,16 +87,17 @@ class Executor:
 class Agent:
     """Orchestrator: memory → Planner → tools → Executor (streaming)."""
 
-    def __init__(self, llm, memory, scheduler=None, long_term_memory=None,
-                 knowledge_graph=None):
-        self.llm = llm
+    def __init__(self, fast_llm, smart_llm, memory, scheduler=None,
+                 long_term_memory=None, knowledge_graph=None):
+        self.fast_llm = fast_llm      # Haiku — planner, compression, facts
+        self.smart_llm = smart_llm    # Sonnet — executor natural language
         self.memory = memory
         self.long_term = long_term_memory
         self.knowledge_graph = knowledge_graph
         self.profile = Profile()
         self.tools = load_tools(scheduler, self.profile)
-        self.planner = Planner(llm, self.profile, self.tools)
-        self.executor = Executor(llm, self.profile)
+        self.planner = Planner(fast_llm, self.profile, self.tools)
+        self.executor = Executor(smart_llm, self.profile)
 
     def _execute(self, tool_name: str, tool_input: str = "", user_id: str = "") -> str:
         tool = self.tools.get(tool_name)
@@ -193,7 +194,7 @@ class Agent:
                 {"role": "system", "content": "Ringkas percakapan ini dalam 2-3 kalimat. Fokus ke topik, keputusan, fakta. Bahasa Indonesia."},
                 {"role": "user", "content": lines},
             ]
-            return self.llm.chat(msg, max_tokens=200)
+            return self.fast_llm.chat(msg, max_tokens=200)
         except Exception:
             return ""
 
@@ -210,7 +211,7 @@ class Agent:
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"User: {message}\nAssistant: {response}"},
             ]
-            raw = self.llm.chat(msg, max_tokens=300)
+            raw = self.fast_llm.chat(msg, max_tokens=300)
             facts = extract_json(raw)
             if isinstance(facts, list):
                 for f in facts[:3]:

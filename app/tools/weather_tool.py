@@ -1,8 +1,11 @@
 import json
+import time
 import urllib.request
 import urllib.error
 
 from app.tools.base import Tool
+
+_weather_cache = {}  # city -> (timestamp, result)
 
 
 class WeatherTool(Tool):
@@ -10,14 +13,22 @@ class WeatherTool(Tool):
     description = "Get current weather for a city. Input: city name. Uses Open-Meteo (free, no API key)."
 
     def run(self, input: str = "") -> str:
-        city = input.strip()
+        city = input.strip().lower()
         if not city:
             return "Error: city name required"
 
+        # Cache check — 30 min TTL
+        if city in _weather_cache:
+            ts, result = _weather_cache[city]
+            if time.time() - ts < 1800:
+                return result
+
         try:
-            lat, lon, name = self._geocode(city)
+            lat, lon, name = self._geocode(input.strip())
             weather = self._fetch_weather(lat, lon)
-            return f"Cuaca di {name}: {weather}"
+            result = f"Cuaca di {name}: {weather}"
+            _weather_cache[city] = (time.time(), result)
+            return result
         except Exception as e:
             return f"Error: {e}"
 
