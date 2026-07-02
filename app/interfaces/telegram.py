@@ -78,8 +78,8 @@ class TelegramBot:
                 pass
 
     def _send_to_user(self, text: str):
-        if self._app is None or self._user_id is None:
-            print(f"[TELEGRAM] Cannot send: app={self._app is not None} user={self._user_id}", flush=True)
+        if self._app is None or self._user_id is None or self._loop is None:
+            print(f"[TELEGRAM] Cannot send: app={self._app is not None} user={self._user_id} loop={self._loop is not None}", flush=True)
             return
         try:
             print(f"[TELEGRAM] Sending to {self._user_id}: {text[:50]}", flush=True)
@@ -127,7 +127,10 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("help", self._handle_help))
         self._app.add_handler(CommandHandler("start", self._handle_help))
 
-        self.scheduler._on_notify = lambda uid, msg: self._send_to_user(f"\u23f0 Pengingat: {msg}")
+        self.scheduler._on_notify = lambda uid, msg: (
+            print(f"[NOTIFY] reminder for {uid}: {msg[:40]}", flush=True),
+            self._send_to_user(f"\u23f0 Pengingat: {msg}")
+        )[1]
         self.scheduler.start()
 
         if self._bus:
