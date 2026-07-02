@@ -44,7 +44,7 @@ class Planner:
             system_prompt=prompt,
             profile=self.profile.load(),
             history=history,
-            message=message,
+            message="[RESPOND WITH JSON ONLY]\n\n" + message,
         )
         raw = self.llm.chat(messages, temperature=0.0)
         data = extract_json(raw)
