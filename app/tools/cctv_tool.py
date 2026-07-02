@@ -35,7 +35,7 @@ class CctvTool(Tool):
         "CCTV Jogja network (cctv.jogjakota.go.id). 154 cameras across Yogyakarta. "
         "Commands: list:<area>, view:<camera_id|area_name>, info:<camera_id>. "
         "'list' searches by kecamatan, kelurahan, or keyword in title. "
-        "'view' opens the camera and takes a screenshot."
+        "'view' captures a 10-second video clip from the camera."
     )
 
     def __init__(self, browser_tool=None):
@@ -154,9 +154,9 @@ class CctvTool(Tool):
 
         try:
             subprocess.run(
-                ["ffmpeg", "-y", "-i", stream_url, "-t", "5", "-c", "copy",
+                ["ffmpeg", "-y", "-i", stream_url, "-t", "10", "-c", "copy",
                  "-loglevel", "error", out],
-                timeout=20, capture_output=True,
+                timeout=30, capture_output=True,
             )
             if os.path.exists(out) and os.path.getsize(out) > 1000:
                 return out
