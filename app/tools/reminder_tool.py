@@ -1,4 +1,19 @@
+from datetime import datetime, timedelta
 from app.tools.base import Tool
+
+MONTHS = [
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+]
+DAYS = {
+    "senin": "Senin", "monday": "Senin",
+    "selasa": "Selasa", "tuesday": "Selasa",
+    "rabu": "Rabu", "wednesday": "Rabu",
+    "kamis": "Kamis", "thursday": "Kamis",
+    "jumat": "Jumat", "friday": "Jumat",
+    "sabtu": "Sabtu", "saturday": "Sabtu",
+    "minggu": "Minggu", "sunday": "Minggu",
+}
 
 
 class ReminderTool(Tool):
@@ -15,7 +30,6 @@ class ReminderTool(Tool):
         self._scheduler = scheduler
 
     def _parse(self, input_str: str) -> tuple:
-        """Returns (task_type, params_list, message)."""
         task_type = input_str.split(":")[0].strip().lower()
 
         if task_type in ("delay", "every"):
@@ -54,6 +68,24 @@ class ReminderTool(Tool):
 
         raise ValueError(f"unknown type '{task_type}'. Use delay, every, at, daily, weekly.")
 
+    def _fmt_time(self, seconds: int) -> str:
+        if seconds < 60:
+            return f"{seconds} detik"
+        if seconds < 3600:
+            return f"{seconds // 60} menit"
+        if seconds < 86400:
+            h, m = divmod(seconds, 3600)
+            return f"{h} jam" + (f" {m} menit" if m else "")
+        d = seconds // 86400
+        return f"{d} hari"
+
+    def _fmt_iso(self, iso: str) -> str:
+        try:
+            dt = datetime.fromisoformat(iso)
+            return f"{dt.day} {MONTHS[dt.month]} {dt.year}, {dt.strftime('%H:%M')}"
+        except ValueError:
+            return iso
+
     def run(self, input: str = "", user_id: str = "") -> str:
         try:
             task_type, params, message = self._parse(input)
@@ -68,25 +100,26 @@ class ReminderTool(Tool):
         if task_type == "delay":
             seconds = int(params[0])
             self._scheduler.add(user_id, message, delay_seconds=seconds)
-            return f"Pengingat disetel untuk {seconds} detik lagi: {message}"
+            return f"Oke, gue ingetin {self._fmt_time(seconds)} lagi: {message}"
 
         if task_type == "every":
             seconds = int(params[0])
             self._scheduler.add(user_id, message, interval_seconds=seconds)
-            return f"Pengingat berulang setiap {seconds} detik: {message}"
+            return f"Oke, gue ingetin setiap {self._fmt_time(seconds)}: {message}"
 
         if task_type == "at":
             self._scheduler.add(user_id, message, run_at=params[0])
-            return f"Pengingat disetel untuk {params[0]}: {message}"
+            return f"Oke, gue ingetin tanggal {self._fmt_iso(params[0])}: {message}"
 
         if task_type == "daily":
             run_at, interval = self._scheduler.calc_daily(params[0])
             self._scheduler.add(user_id, message, run_at=run_at, interval_seconds=interval)
-            return f"Pengingat harian jam {params[0]}: {message}"
+            return f"Oke, gue ingetin setiap hari jam {params[0]}: {message}"
 
         if task_type == "weekly":
             run_at, interval = self._scheduler.calc_weekly(params[0], params[1])
+            day_name = DAYS.get(params[0].lower(), params[0])
             self._scheduler.add(user_id, message, run_at=run_at, interval_seconds=interval)
-            return f"Pengingat mingguan setiap {params[0]} jam {params[1]}: {message}"
+            return f"Oke, gue ingetin setiap {day_name} jam {params[1]}: {message}"
 
         return f"Error: unknown type '{task_type}'"
