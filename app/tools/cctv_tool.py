@@ -1,7 +1,5 @@
 import json
 import urllib.request
-import urllib.error
-from datetime import datetime
 
 from app.tools.base import Tool
 
