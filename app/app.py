@@ -8,6 +8,7 @@ from app.llm.deepseek import DeepSeekLLM
 from app.agent.memory import Memory
 from app.agent.agent import Agent
 from app.agent.scheduler import Scheduler
+from app.config.settings import settings
 from app.memory.long_term import LongTermMemory
 from app.os.event_bus import EventBus
 from app.os.goal_manager import GoalManager
@@ -15,10 +16,12 @@ from app.os.knowledge_graph import KnowledgeGraph
 from app.agents.watcher import WatcherManager
 
 
+from app.llm.anthropic import ClaudeLLM
+
 def create_core():
     event_bus = EventBus()
 
-    llm = DeepSeekLLM()
+    llm = ClaudeLLM() if settings.LLM_PROVIDER == "anthropic" else DeepSeekLLM()
     memory = Memory()
     long_term = LongTermMemory()
     scheduler = Scheduler()
