@@ -28,7 +28,11 @@ class TelegramBot:
 
         await update.message.reply_chat_action(ChatAction.TYPING)
         loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(None, self.agent.chat, user_id, message)
+        try:
+            response = await loop.run_in_executor(None, self.agent.chat, user_id, message)
+        except Exception as e:
+            response = "Maaf, ada error. Coba lagi nanti."
+            print(f"Agent error: {e}")
 
         self.memory.add(user_id, "assistant", response)
 
