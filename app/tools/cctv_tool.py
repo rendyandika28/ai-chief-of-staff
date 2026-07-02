@@ -213,12 +213,10 @@ class CctvTool(Tool):
         return "\n".join(lines)
 
     def _capture_video_browser(self, stream_url: str, name: str) -> str:
-        """Capture 10s video via Playwright screen recording with HLS.js player."""
         if self._browser is None:
             return ""
 
         try:
-            # Access the underlying Playwright browser
             browser = self._browser._session._browser if hasattr(self._browser, '_session') else None
             if browser is None:
                 return ""
@@ -230,24 +228,36 @@ class CctvTool(Tool):
             context = browser.new_context(
                 record_video_dir=video_dir,
                 record_video_size={"width": 1280, "height": 720},
+                viewport={"width": 1280, "height": 720},
             )
             page = context.new_page()
 
             html = (
-                f"<html><head>"
-                f"<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
-                f"</head><body style='margin:0;background:#000'>"
-                f"<video id='v' autoplay muted playsinline style='width:100vw;height:100vh'></video>"
-                f"<script>"
-                f"const v=document.getElementById('v');"
-                f"if(Hls.isSupported()){{const h=new Hls();h.loadSource('{stream_url}');"
-                f"h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}}"
-                f"</script></body></html>"
+                "<html><head>"
+                "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
+                "</head><body style='margin:0;background:#000'>"
+                "<video id='v' autoplay muted playsinline style='width:100vw;height:100vh'></video>"
+                "<script>"
+                "const v=document.getElementById('v');"
+                "if(Hls.isSupported()){const h=new Hls();"
+                f"h.loadSource('{stream_url}');h.attachMedia(v);"
+                "h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}"
+                f"else{{v.src='{stream_url}';v.play();}}"
+                "</script></body></html>"
             )
-            page.set_content(html, timeout=15000)
-            time.sleep(12)  # buffer + 10s capture
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(html)
+                tmp_path = f.name
+
+            page.goto(f"file://{tmp_path}", wait_until="domcontentloaded", timeout=15000)
+            time.sleep(13)  # 3s buffer + 10s capture
+
+            # Debug: take screenshot to verify page rendered
+            page.screenshot(path=f"memory/debug_{slug}.png")
 
             context.close()
+            os.remove(tmp_path)
 
             import glob
             videos = sorted(glob.glob(f"{video_dir}/*.webm"))
