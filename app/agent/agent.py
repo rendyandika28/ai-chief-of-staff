@@ -203,14 +203,8 @@ class Agent:
 
         # Tool execution
         tool_results = self._execute_tools(data, user_id)
-        tool_name = data.get("tool", "")
 
-        if tool_name == "cctv":
-            for char in tool_results:
-                yield char
-            return
-
-        # Stream Executor
+        # Stream Executor for all tools — always natural language summary
         full_text = ""
         for token in self.executor.respond_stream(message, history, tool_results):
             full_text += token

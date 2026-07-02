@@ -21,19 +21,16 @@ from app.llm.anthropic import ClaudeLLM
 def create_core():
     event_bus = EventBus()
 
-    # Haiku (fast/cheap) for planner + compression + facts
-    fast_llm = ClaudeLLM(model="claude-haiku-4-5-20251001")
-    # Sonnet (smart) for executor natural conversation
-    smart_llm = ClaudeLLM(model="claude-sonnet-5")
+    # Single Sonnet for everything — Haiku too dumb for routing
+    llm = ClaudeLLM(model="claude-sonnet-5")
 
     memory = Memory()
     long_term = LongTermMemory()
     scheduler = Scheduler()
-
     knowledge_graph = KnowledgeGraph()
     goal_manager = GoalManager()
 
-    agent = Agent(fast_llm, smart_llm, memory, scheduler, long_term, knowledge_graph)
+    agent = Agent(llm, llm, memory, scheduler, long_term, knowledge_graph)
 
     watchers = WatcherManager(event_bus)
 
