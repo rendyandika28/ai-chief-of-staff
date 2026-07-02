@@ -1,4 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+WIB = timezone(timedelta(hours=7))
+
 from app.tools.base import Tool
 
 MONTHS = [
@@ -111,7 +114,7 @@ class ReminderTool(Tool):
             # ponytail: correct hallucinated dates. If year is wrong (LLM quirk), use today.
             try:
                 dt = datetime.fromisoformat(params[0])
-                now = datetime.now()
+                now = datetime.now(WIB)
                 if dt.year < now.year:
                     dt = dt.replace(year=now.year)
                     if dt < now:

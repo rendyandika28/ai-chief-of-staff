@@ -1,8 +1,10 @@
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.lib.database import Database
+
+WIB = timezone(timedelta(hours=7))
 
 DAYS = {
     "senin": 0, "monday": 0,
@@ -38,7 +40,7 @@ class Scheduler:
     def add(self, user_id: str, message: str, delay_seconds: int = 0,
             run_at: str = "", interval_seconds: int = 0):
         if not run_at:
-            run_at = (datetime.now() + timedelta(seconds=delay_seconds)).isoformat()
+            run_at = (datetime.now(WIB) + timedelta(seconds=delay_seconds)).isoformat()
         interval = interval_seconds if interval_seconds > 0 else None
         self._db.commit_sql(
             "INSERT INTO tasks (user_id, message, run_at, interval_seconds) VALUES (?, ?, ?, ?)",
@@ -53,7 +55,7 @@ class Scheduler:
     def calc_daily(time_str: str) -> tuple:
         """Returns (run_at_iso, interval_seconds) for daily at HH:MM."""
         h, m = map(int, time_str.split(":"))
-        now = datetime.now()
+        now = datetime.now(WIB)
         run_at = now.replace(hour=h, minute=m, second=0, microsecond=0)
         if run_at <= now:
             run_at += timedelta(days=1)
@@ -67,7 +69,7 @@ class Scheduler:
         if target_dow is None:
             raise ValueError(f"Unknown day: {day}")
 
-        now = datetime.now()
+        now = datetime.now(WIB)
         run_at = now.replace(hour=h, minute=m, second=0, microsecond=0)
         days_ahead = target_dow - run_at.weekday()
         if days_ahead < 0 or (days_ahead == 0 and run_at <= now):
@@ -76,7 +78,7 @@ class Scheduler:
         return run_at.isoformat(), 604800
 
     def _get_due(self):
-        now = datetime.now().isoformat()
+        now = datetime.now(WIB).isoformat()
         return self._db.fetch(
             "SELECT id, user_id, message, interval_seconds FROM tasks WHERE status='pending' AND run_at <= ?",
             (now,),
@@ -86,7 +88,7 @@ class Scheduler:
         self._db.commit_sql("UPDATE tasks SET status='done' WHERE id=?", (task_id,))
 
     def _reschedule(self, task_id: int, interval_seconds: int):
-        run_at = (datetime.now() + timedelta(seconds=interval_seconds)).isoformat()
+        run_at = (datetime.now(WIB) + timedelta(seconds=interval_seconds)).isoformat()
         self._db.commit_sql("UPDATE tasks SET run_at=? WHERE id=?", (run_at, task_id))
 
     def _loop(self):
