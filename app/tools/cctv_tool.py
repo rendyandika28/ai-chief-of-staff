@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import os
+import sys
 import time
 import urllib.request
 import urllib.parse
@@ -213,14 +214,16 @@ class CctvTool(Tool):
         return "\n".join(lines)
 
     def _capture_video_browser(self, stream_url: str, name: str) -> str:
+        sys.stderr.write(f"[CCTV] video capture start for {name}\n")
+        sys.stderr.flush()
         if self._browser is None:
-            print("[CCTV] browser tool is None", flush=True)
+            sys.stderr.write("[CCTV] browser is None\n"); sys.stderr.flush()
             return ""
 
         try:
             session = self._browser._session if hasattr(self._browser, '_session') else None
             if session is None:
-                print("[CCTV] no browser session", flush=True)
+                sys.stderr.write("[CCTV] no browser session\n"); sys.stderr.flush()
                 return ""
             session._ensure_page()
             browser = session._browser
@@ -270,10 +273,10 @@ class CctvTool(Tool):
             if videos:
                 out = f"memory/cctv_{slug}.mp4"
                 os.rename(videos[-1], out)
-                print(f"[CCTV] video captured: {out}", flush=True)
+                sys.stderr.write(f"[CCTV] video captured: {out}\n"); sys.stderr.flush()
                 return out
         except Exception as e:
-            print(f"[CCTV] video capture error: {e}", flush=True)
+            sys.stderr.write(f"[CCTV] video capture error: {e}\n"); sys.stderr.flush()
         return ""
 
     def _capture_screenshot(self, stream_url: str, name: str) -> str:
