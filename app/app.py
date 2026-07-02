@@ -22,6 +22,7 @@ def create_core():
     event_bus = EventBus()
 
     llm = ClaudeLLM() if settings.LLM_PROVIDER == "anthropic" else DeepSeekLLM()
+    print(f"[APP] Using LLM: {type(llm).__name__} (provider={settings.LLM_PROVIDER})", flush=True)
     memory = Memory()
     long_term = LongTermMemory()
     scheduler = Scheduler()

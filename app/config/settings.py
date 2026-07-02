@@ -7,7 +7,7 @@ class Settings:
     DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
     ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").strip()
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 
