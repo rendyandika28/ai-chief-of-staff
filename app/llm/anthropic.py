@@ -18,7 +18,7 @@ class ClaudeLLM:
                 else:
                     chat_messages.append(m)
 
-            kwargs = {"model": settings.ANTHROPIC_MODEL, "max_tokens": max_tokens, "temperature": temperature}
+            kwargs = {"model": settings.ANTHROPIC_MODEL, "max_tokens": max_tokens}
             if system:
                 kwargs["system"] = system
             kwargs["messages"] = chat_messages
