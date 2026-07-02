@@ -135,7 +135,8 @@ class CctvTool(Tool):
             if nearby:
                 lines = [f"Tidak ada CCTV dengan nama '{query}'. Kamera terdekat:"]
                 for c in nearby:
-                    loc = f"{c['kecamatan_nama']} > {c['kelurahan_nama']}"
+                    parts = [p for p in [c.get('kecamatan_nama',''), c.get('kelurahan_nama','')] if p]
+                    loc = " > ".join(parts) if parts else "Yogyakarta"
                     dist = haversine(
                         *self._geocode(query),
                         float(c["cctv_latitude"]), float(c["cctv_longitude"]),

@@ -14,7 +14,7 @@ Default: kalau ragu, pilih chat. Lo bisa ngobrol natural, gak harus JSON.
 
 - weather: cuaca → input: nama kota (contoh: "jakarta")
 - time: jam sekarang → input: kosong
-- cctv: lihat kamera CCTV Jogja → input: view:nama_area
+- cctv: lihat kamera CCTV Jogja → list: (kosong utk semua), view:nama_area, info:id. SEMUA kamera ada di Jogja.
 - traffic: cek lalu lintas → input: nama lokasi
 - reminder: set pengingat → input: at:ISO_datetime, delay:detik, daily:HH:MM, weekly:day:HH:MM
 - calc: kalkulator → input: ekspresi matematika
