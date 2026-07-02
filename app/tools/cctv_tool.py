@@ -217,7 +217,11 @@ class CctvTool(Tool):
             return ""
 
         try:
-            browser = self._browser._session._browser if hasattr(self._browser, '_session') else None
+            session = self._browser._session if hasattr(self._browser, '_session') else None
+            if session is None:
+                return ""
+            session._ensure_page()
+            browser = session._browser
             if browser is None:
                 return ""
 
