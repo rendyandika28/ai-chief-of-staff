@@ -28,7 +28,46 @@ class ClaudeLLM:
             logging.error(f"Claude stream error: {e}")
             yield ""
 
-    def _build_kwargs(self, messages: list, max_tokens: int) -> dict:
+    def stream_with_tools(self, messages: list, tools: list, runner, max_tokens: int = 1024):
+        """Native tool-use loop: streams the reply in-persona, calling tools as the
+        model requests them. `runner(name, input_dict) -> str` executes a tool."""
+        system, chat = self._split(messages)
+        try:
+            while True:
+                kwargs = {
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "messages": chat,
+                    "thinking": {"type": "disabled"},
+                }
+                if system:
+                    kwargs["system"] = system
+                if tools:
+                    kwargs["tools"] = tools
+                with self.client.messages.stream(**kwargs) as stream:
+                    for text in stream.text_stream:
+                        yield text
+                    final = stream.get_final_message()
+
+                if final.stop_reason != "tool_use":
+                    return
+
+                chat.append({"role": "assistant", "content": final.content})
+                results = []
+                for block in final.content:
+                    if block.type == "tool_use":
+                        out = runner(block.name, block.input)
+                        results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": out,
+                        })
+                chat.append({"role": "user", "content": results})
+        except Exception as e:
+            logging.error(f"Claude tool-stream error: {e}")
+            yield ""
+
+    def _split(self, messages: list):
         system = None
         chat_messages = []
         for m in messages:
@@ -36,7 +75,10 @@ class ClaudeLLM:
                 system = m["content"]
             else:
                 chat_messages.append(m)
+        return system, chat_messages
 
+    def _build_kwargs(self, messages: list, max_tokens: int) -> dict:
+        system, chat_messages = self._split(messages)
         kwargs = {"model": self.model, "max_tokens": max_tokens}
         if system:
             kwargs["system"] = system

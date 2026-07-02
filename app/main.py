@@ -3,7 +3,7 @@ from app.interfaces.telegram import TelegramBot
 
 
 def main():
-    agent, memory, scheduler, event_bus, goal_manager, watchers = create_core()
+    agent, memory, scheduler, event_bus, watchers = create_core()
     bot = TelegramBot(agent, memory, scheduler, event_bus, watchers)
     bot.run()
 
