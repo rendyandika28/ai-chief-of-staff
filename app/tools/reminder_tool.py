@@ -101,12 +101,18 @@ class ReminderTool(Tool):
             return "Error: user_id required"
 
         if task_type == "delay":
-            seconds = int(params[0])
+            try:
+                seconds = int(params[0])
+            except ValueError:
+                return "Error: seconds must be a number"
             self._scheduler.add(user_id, message, delay_seconds=seconds)
             return f"Oke, gue ingetin {self._fmt_time(seconds)} lagi: {message}"
 
         if task_type == "every":
-            seconds = int(params[0])
+            try:
+                seconds = int(params[0])
+            except ValueError:
+                return "Error: seconds must be a number"
             self._scheduler.add(user_id, message, interval_seconds=seconds)
             return f"Oke, gue ingetin setiap {self._fmt_time(seconds)}: {message}"
 
