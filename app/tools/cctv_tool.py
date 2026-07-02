@@ -1,8 +1,6 @@
 import json
-import logging
 import math
 import os
-import sys
 import time
 import urllib.request
 import urllib.parse
@@ -203,44 +201,16 @@ class CctvTool(Tool):
 
         lines = [f"Camera: {name}", f"Area: {area}"]
 
-        video_path = self._capture_video_browser(stream_url, name)
-        if video_path:
-            lines.append(f"[VIDEO:{video_path}]")
-        elif self._browser:
-            img = self._capture_screenshot(stream_url, name)
-            if img:
-                lines.append(f"[IMAGE:{img}]")
+        imgs = self._capture_frames(stream_url, name) if self._browser else []
+        for p in imgs:
+            lines.append(f"[IMAGE:{p}]")
 
         return "\n".join(lines)
 
-    def _capture_video_browser(self, stream_url: str, name: str) -> str:
-        sys.stderr.write(f"[CCTV] video capture start for {name}\n")
-        sys.stderr.flush()
-        if self._browser is None:
-            sys.stderr.write("[CCTV] browser is None\n"); sys.stderr.flush()
-            return ""
-
+    def _capture_frames(self, stream_url: str, name: str) -> list:
+        """Take 4 screenshots across 10 seconds from the HLS player."""
+        paths = []
         try:
-            session = self._browser._session if hasattr(self._browser, '_session') else None
-            if session is None:
-                sys.stderr.write("[CCTV] no browser session\n"); sys.stderr.flush()
-                return ""
-            session._ensure_page()
-            browser = session._browser
-            if browser is None:
-                return ""
-
-            slug = name.lower().replace(" ", "_")[:20]
-            video_dir = os.path.abspath(f"memory/video_{slug}")
-            os.makedirs(video_dir, exist_ok=True)
-
-            context = browser.new_context(
-                record_video_dir=video_dir,
-                record_video_size={"width": 1280, "height": 720},
-                viewport={"width": 1280, "height": 720},
-            )
-            page = context.new_page()
-
             html = (
                 "<html><head>"
                 "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
@@ -259,50 +229,16 @@ class CctvTool(Tool):
                 f.write(html)
                 tmp_path = f.name
 
-            page.goto(f"file://{tmp_path}", wait_until="domcontentloaded", timeout=15000)
-            time.sleep(13)  # 3s buffer + 10s capture
-
-            # Debug: take screenshot to verify page rendered
-            page.screenshot(path=f"memory/debug_{slug}.png")
-
-            context.close()
-            os.remove(tmp_path)
-
-            import glob
-            videos = sorted(glob.glob(f"{video_dir}/*.webm"))
-            if videos:
-                out = f"memory/cctv_{slug}.mp4"
-                os.rename(videos[-1], out)
-                sys.stderr.write(f"[CCTV] video captured: {out}\n"); sys.stderr.flush()
-                return out
-        except Exception as e:
-            sys.stderr.write(f"[CCTV] video capture error: {e}\n"); sys.stderr.flush()
-        return ""
-
-    def _capture_screenshot(self, stream_url: str, name: str) -> str:
-        try:
-            html = (
-                "<html><head>"
-                "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
-                "</head><body style='margin:0;background:#000'>"
-                "<video id='v' autoplay muted playsinline style='width:100vw;height:100vh'></video>"
-                "<script>"
-                "const v=document.getElementById('v');"
-                f"if(Hls.isSupported()){{const h=new Hls();h.loadSource('{stream_url}');h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}}"
-                f"else if(v.canPlayType('application/vnd.apple.mpegurl')){{v.src='{stream_url}';v.play();}}"
-                "</script></body></html>"
-            ).replace("Hls", "Hls")  # no-op, just keeping hls.js ref
-
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
-                f.write(html)
-                tmp_path = f.name
-
             self._browser.run(f"navigate:file://{tmp_path}")
-            time.sleep(4)
-            result = self._browser.run("screenshot")
-            if "Screenshot saved:" in result:
-                return result.split("Screenshot saved:")[1].strip()
+            time.sleep(3)
+
+            for _ in range(4):
+                time.sleep(2.5)
+                result = self._browser.run("screenshot")
+                if "Screenshot saved:" in result:
+                    paths.append(result.split("Screenshot saved:")[1].strip())
+
+            os.remove(tmp_path)
         except Exception:
             pass
-        return ""
+        return paths
