@@ -11,11 +11,13 @@ class DeepSeekLLM:
             base_url=settings.DEEPSEEK_BASE_URL,
         )
 
-    def chat(self, messages: list) -> str:
+    def chat(self, messages: list, temperature: float = 0.3, max_tokens: int = 4096) -> str:
         try:
             response = self.client.chat.completions.create(
                 model=settings.DEEPSEEK_MODEL,
                 messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
                 timeout=60,
             )
             return response.choices[0].message.content

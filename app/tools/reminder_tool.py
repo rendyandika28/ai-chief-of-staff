@@ -108,6 +108,17 @@ class ReminderTool(Tool):
             return f"Oke, gue ingetin setiap {self._fmt_time(seconds)}: {message}"
 
         if task_type == "at":
+            # ponytail: correct hallucinated dates. If year is wrong (LLM quirk), use today.
+            try:
+                dt = datetime.fromisoformat(params[0])
+                now = datetime.now()
+                if dt.year < now.year:
+                    dt = dt.replace(year=now.year)
+                    if dt < now:
+                        dt = dt.replace(year=now.year + 1)
+                    params[0] = dt.isoformat()
+            except ValueError:
+                pass
             self._scheduler.add(user_id, message, run_at=params[0])
             return f"Oke, gue ingetin tanggal {self._fmt_iso(params[0])}: {message}"
 
