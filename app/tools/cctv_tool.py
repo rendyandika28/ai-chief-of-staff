@@ -140,7 +140,6 @@ class CctvTool(Tool):
             return self._camera_info(cameras, cam["cctv_id"])
 
         try:
-            # Build page with hls.js for reliable HLS playback
             html = (
                 "<html><head>"
                 "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
@@ -152,9 +151,12 @@ class CctvTool(Tool):
                 f"else if(v.canPlayType('application/vnd.apple.mpegurl')){{v.src='{stream_url}';v.play();}}"
                 "</script></body></html>"
             )
-            data_url = "data:text/html;charset=utf-8," + urllib.request.quote(html)
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(html)
+                tmp_path = f.name
 
-            self._browser.run(f"navigate:{data_url}")
+            self._browser.run(f"navigate:file://{tmp_path}")
             import time
             time.sleep(5)  # give stream time to load + render frames
             result = self._browser.run("screenshot")
