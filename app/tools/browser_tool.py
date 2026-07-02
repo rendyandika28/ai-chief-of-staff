@@ -1,3 +1,6 @@
+import glob
+import os
+import time as _time
 from datetime import datetime
 from app.tools.base import Tool
 
@@ -62,6 +65,32 @@ class PlaywrightSession:
             self._playwright.stop()
             self._playwright = None
         self._page = None
+
+    def record_video(self, html_content: str, duration: int, output_path: str) -> str:
+        """Create a new context, load HTML, record video for `duration` seconds,
+        close context, return output_path if successful or empty string."""
+        self._ensure_page()
+        if self._browser is None:
+            return ""
+
+        video_dir = os.path.dirname(output_path)
+        os.makedirs(video_dir, exist_ok=True)
+
+        ctx = self._browser.new_context(
+            record_video_dir=video_dir,
+            record_video_size={"width": 1280, "height": 720},
+            viewport={"width": 1280, "height": 720},
+        )
+        page = ctx.new_page()
+        page.set_content(html_content, timeout=15000)
+        _time.sleep(duration)
+        ctx.close()
+
+        videos = sorted(glob.glob(os.path.join(video_dir, "*.webm")))
+        if videos:
+            os.rename(videos[-1], output_path)
+            return output_path
+        return ""
 
 
 class BrowserTool(Tool):

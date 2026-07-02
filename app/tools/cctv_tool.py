@@ -1,8 +1,6 @@
 import json
 import math
 import os
-import subprocess
-import time
 import urllib.request
 import urllib.parse
 
@@ -202,60 +200,27 @@ class CctvTool(Tool):
 
         lines = [f"Camera: {name}", f"Area: {area}"]
 
-        video = self._capture_video(stream_url, name) if self._browser else ""
-        if video:
-            lines.append(f"[VIDEO:{video}]")
+        if self._browser and hasattr(self._browser, '_session'):
+            video = self._capture_video(stream_url, name)
+            if video:
+                lines.append(f"[VIDEO:{video}]")
         return "\n".join(lines)
 
     def _capture_video(self, stream_url: str, name: str) -> str:
         slug = name.lower().replace(" ", "_")[:20]
-        frame_dir = f"memory/frames_{slug}"
         out = f"memory/cctv_{slug}.mp4"
-        os.makedirs(frame_dir, exist_ok=True)
 
-        try:
-            html = (
-                "<html><head>"
-                "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
-                "</head><body style='margin:0;background:#000'>"
-                "<video id='v' autoplay muted playsinline style='width:100vw;height:100vh'></video>"
-                "<script>"
-                "const v=document.getElementById('v');"
-                "if(Hls.isSupported()){const h=new Hls();"
-                f"h.loadSource('{stream_url}');h.attachMedia(v);"
-                "h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}"
-                f"else{{v.src='{stream_url}';v.play();}}"
-                "</script></body></html>"
-            )
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
-                f.write(html)
-                tmp_path = f.name
-
-            self._browser.run(f"navigate:file://{tmp_path}")
-            time.sleep(3)
-
-            for i in range(10):
-                time.sleep(1)
-                result = self._browser.run("screenshot")
-                if "Screenshot saved:" in result:
-                    src = result.split("Screenshot saved:")[1].strip()
-                    dst = f"{frame_dir}/frame_{i:04d}.png"
-                    if os.path.exists(src):
-                        os.rename(src, dst)
-
-            os.remove(tmp_path)
-
-            subprocess.run(
-                ["ffmpeg", "-y", "-framerate", "1", "-i", f"{frame_dir}/frame_%04d.png",
-                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-loglevel", "error", out],
-                timeout=30, capture_output=True,
-            )
-            import shutil
-            shutil.rmtree(frame_dir, ignore_errors=True)
-
-            if os.path.exists(out) and os.path.getsize(out) > 1000:
-                return out
-        except Exception:
-            pass
-        return ""
+        html = (
+            "<html><head>"
+            "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
+            "</head><body style='margin:0;background:#000'>"
+            "<video id='v' autoplay muted playsinline style='width:100%;height:100vh'></video>"
+            "<script>"
+            "const v=document.getElementById('v');"
+            "if(Hls.isSupported()){const h=new Hls();"
+            f"h.loadSource('{stream_url}');h.attachMedia(v);"
+            "h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}"
+            f"else{{v.src='{stream_url}';v.play();}}"
+            "</script></body></html>"
+        )
+        return self._browser._session.record_video(html, 13, out)
