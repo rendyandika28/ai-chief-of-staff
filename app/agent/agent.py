@@ -49,8 +49,8 @@ class Planner:
         raw = self.llm.chat(messages)
         data = extract_json(raw)
         if data is None or validate(data, self._tool_exists) is not None:
-            logging.warning(f"Planner invalid response: {raw[:200]}")
-            return None
+            logging.warning(f"Planner invalid response, using as chat: {raw[:200]}")
+            return {"action": "chat", "message": raw.strip()}
         return data
 
 
