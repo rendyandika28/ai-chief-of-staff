@@ -83,12 +83,14 @@ class TelegramBot:
             return
         try:
             print(f"[TELEGRAM] Sending to {self._user_id}: {text[:50]}", flush=True)
-            asyncio.run_coroutine_threadsafe(
+            future = asyncio.run_coroutine_threadsafe(
                 self._app.bot.send_message(chat_id=int(self._user_id), text=text),
                 self._loop,
             )
+            result = future.result(timeout=5)
+            print(f"[TELEGRAM] Sent OK: {result}", flush=True)
         except Exception as e:
-            print(f"[TELEGRAM] Send error: {e}", flush=True)
+            print(f"[TELEGRAM] Send error: {type(e).__name__}: {e}", flush=True)
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
