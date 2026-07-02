@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from telegram import Update, BotCommand
 from telegram.constants import ChatAction
@@ -36,7 +37,25 @@ class TelegramBot:
 
         self.memory.add(user_id, "assistant", response)
 
-        await update.message.reply_text(response)
+        await self._send_response(update, response)
+
+    async def _send_response(self, update: Update, raw: str):
+        # Strip [IMAGE:path] markers from text, send them as photos
+        text = raw
+        image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
+        text = re.sub(r'\[IMAGE:.*?\]', '', text).strip()
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        if text:
+            await update.message.reply_text(text)
+
+        for path in image_paths:
+            import os
+            if os.path.exists(path):
+                try:
+                    await update.message.reply_photo(photo=open(path, 'rb'))
+                except Exception:
+                    pass
 
     def _send_to_user(self, text: str):
         if self._app is None or self._user_id is None:

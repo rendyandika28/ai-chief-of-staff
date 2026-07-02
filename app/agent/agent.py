@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+import re
 from app.agent.profile import Profile
 from app.prompt.builder import PromptBuilder
 from app.tools.init import load_tools
@@ -167,6 +168,10 @@ class Agent:
                 response = self.executor.respond(message, history, tool_results)
                 if response is None:
                     response = tool_results
+                # Preserve [IMAGE:path] markers from tool results
+                images = re.findall(r'\[IMAGE:.*?\]', tool_results)
+                if images:
+                    response += "\n" + "\n".join(images)
 
             last_response = response
 

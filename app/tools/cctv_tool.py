@@ -154,19 +154,22 @@ class CctvTool(Tool):
 
             self._browser.run(f"navigate:{data_url}")
 
-            ts = datetime.now().strftime("%H%M%S")
-            slug = name.lower().replace(" ", "_")[:30]
-            path = f"memory/cctv_{slug}_{ts}.png"
-
             import time
             time.sleep(3)
-            self._browser.run(f"screenshot")
+            result = self._browser.run("screenshot")
 
-            return (
-                f"Camera: {name}\n"
-                f"Area: {area}\n"
-                f"Stream: {stream_url}\n"
-                f"Lihat peta: {CCTV_MAP}"
-            )
+            # Extract path from browser screenshot output: "Screenshot saved: memory/xxx.png"
+            img_path = ""
+            if "Screenshot saved:" in result:
+                img_path = result.split("Screenshot saved:")[1].strip()
+
+            lines = [
+                f"Camera: {name}",
+                f"Area: {area}",
+            ]
+            if img_path:
+                lines.append(f"[IMAGE:{img_path}]")
+
+            return "\n".join(lines)
         except Exception as e:
             return f"{self._camera_info(cameras, cam['cctv_id'])}\n\nError screenshot: {e}"

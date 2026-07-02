@@ -25,21 +25,20 @@ class TrafficTool(Tool):
             encoded = location.replace(" ", "+")
             url = f"https://www.google.com/maps/search/{encoded}"
 
-            nav = self._browser.run(f"navigate:{url}")
-            content = self._browser.run("content")
+            self._browser.run(f"navigate:{url}")
+            import time; time.sleep(2)
+            result = self._browser.run("screenshot")
 
-            lines = content.split("\n")
-            traffic_lines = [
-                l for l in lines
-                if any(w in l.lower() for w in ["lalu lintas", "macet", "lancar", "padat", "traffic", "menit", "km", "jalan"])
-            ]
+            img_path = ""
+            if "Screenshot saved:" in result:
+                img_path = result.split("Screenshot saved:")[1].strip()
 
-            if traffic_lines:
-                return (
-                    f"Lalu lintas di {location}:\n" +
-                    "\n".join(f"  {l}" for l in traffic_lines[:10])
-                )
-            return f"Lalu lintas {location}: tidak ada info kemacetan yang terdeteksi.\nLihat langsung: {url}"
+            lines = [f"Lalu lintas di {location}:"]
+            if img_path:
+                lines.append(f"[IMAGE:{img_path}]")
+            lines.append(f"Link: {url}")
+
+            return "\n".join(lines)
 
         except Exception as e:
             return f"Error cek lalu lintas: {e}\nCek manual: https://www.google.com/maps/search/{location.replace(' ', '+')}"
