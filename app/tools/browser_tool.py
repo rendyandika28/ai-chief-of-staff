@@ -1,5 +1,6 @@
 import glob
 import os
+import tempfile
 import time as _time
 from datetime import datetime
 from app.tools.base import Tool
@@ -83,9 +84,14 @@ class PlaywrightSession:
             viewport={"width": 1280, "height": 720},
         )
         page = ctx.new_page()
-        page.set_content(html_content, timeout=15000)
+
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(html_content)
+            tmp = f.name
+        page.goto(f"file://{tmp}", wait_until="domcontentloaded", timeout=15000)
         _time.sleep(duration)
         ctx.close()
+        os.remove(tmp)
 
         videos = sorted(glob.glob(os.path.join(video_dir, "*.webm")))
         if videos:
