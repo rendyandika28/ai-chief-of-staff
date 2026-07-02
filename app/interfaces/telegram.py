@@ -77,20 +77,20 @@ class TelegramBot:
                 break
             full_text += token
 
-        # Final update
+        # Final update — strip markers from display text
+        display = full_text
         if error_ref:
-            full_text = "Maaf, ada error. Coba lagi nanti."
-        await sent_msg.edit_text(full_text or "Maaf, ada error. Coba lagi nanti.")
+            display = "Maaf, ada error. Coba lagi nanti."
+        display = re.sub(r'\[(?:VIDEO|IMAGE):.*?\]', '', display).strip()
+        await sent_msg.edit_text(display or "Maaf, ada error. Coba lagi nanti.")
 
         # Handle visual outputs FIRST — before memory filter
         await self._send_media(update, full_text)
 
-        # Store in memory — skip visual tool outputs and fallback
-        if "kesulitan memproses" in full_text:
+        # Store in memory — skip visual outputs and fallback
+        if "kesulitan memproses" in full_text or "Camera:" in full_text:
             return
         if "[VIDEO:" in full_text or "[IMAGE:" in full_text:
-            return
-        if full_text.startswith("[cctv]"):
             return
         self.memory.add(user_id, "assistant", full_text.strip())
 
