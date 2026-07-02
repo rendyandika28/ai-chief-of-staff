@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 
 from telegram import Update, InputMediaPhoto
@@ -42,30 +43,31 @@ class TelegramBot:
         await self._send_response(update, response)
 
     async def _send_response(self, update: Update, raw: str):
-        # Strip [IMAGE:path] markers from text, send them as photos
         text = raw
         image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
-        text = re.sub(r'\[IMAGE:.*?\]', '', text).strip()
+        video_paths = re.findall(r'\[VIDEO:(.*?)\]', raw)
+        text = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', text).strip()
         text = re.sub(r'\n{3,}', '\n\n', text)
 
         if text:
             await update.message.reply_text(text)
 
-        valid_paths = []
-        for path in image_paths:
-            import os
-            if os.path.exists(path):
-                valid_paths.append(path)
+        valid_imgs = [p for p in image_paths if os.path.exists(p)]
+        valid_vids = [p for p in video_paths if os.path.exists(p)]
 
-        if len(valid_paths) == 1:
+        if valid_imgs:
             try:
-                await update.message.reply_photo(photo=open(valid_paths[0], 'rb'))
+                if len(valid_imgs) == 1:
+                    await update.message.reply_photo(photo=open(valid_imgs[0], 'rb'))
+                else:
+                    media = [InputMediaPhoto(media=open(p, 'rb')) for p in valid_imgs]
+                    await update.message.reply_media_group(media=media)
             except Exception:
                 pass
-        elif len(valid_paths) > 1:
+
+        for vp in valid_vids:
             try:
-                media = [InputMediaPhoto(media=open(p, 'rb')) for p in valid_paths]
-                await update.message.reply_media_group(media=media)
+                await update.message.reply_video(video=open(vp, 'rb'), supports_streaming=True)
             except Exception:
                 pass
 

@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import urllib.request
 
 from app.tools.base import Tool
@@ -115,18 +117,14 @@ class CctvTool(Tool):
 
     def _view_camera(self, cameras, arg):
         cam = None
-        # Try by ID first
         for c in cameras:
             if c["cctv_id"] == arg:
                 cam = c
                 break
-
-        # Try by name match
         if cam is None:
             matched = self._match(cameras, arg)
             if matched:
                 cam = matched[0]
-
         if cam is None:
             return f"Camera tidak ditemukan: {arg}"
 
@@ -134,9 +132,39 @@ class CctvTool(Tool):
         stream_url = cam["cctv_link"]
         area = f"{cam['kecamatan_nama']} > {cam['kelurahan_nama']}"
 
-        if self._browser is None:
-            return self._camera_info(cameras, cam["cctv_id"])
+        lines = [f"Camera: {name}", f"Area: {area}"]
 
+        # Try ffmpeg first for 5-second video clip
+        video_path = self._capture_video(stream_url, name)
+        if video_path:
+            lines.append(f"[VIDEO:{video_path}]")
+
+        # Fallback: single screenshot if no ffmpeg
+        if not video_path and self._browser:
+            img = self._capture_screenshot(stream_url, name)
+            if img:
+                lines.append(f"[IMAGE:{img}]")
+
+        return "\n".join(lines)
+
+    def _capture_video(self, stream_url: str, name: str) -> str:
+        slug = name.lower().replace(" ", "_")[:20]
+        out = f"memory/cctv_{slug}.mp4"
+        os.makedirs("memory", exist_ok=True)
+
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", stream_url, "-t", "5", "-c", "copy",
+                 "-loglevel", "error", out],
+                timeout=20, capture_output=True,
+            )
+            if os.path.exists(out) and os.path.getsize(out) > 1000:
+                return out
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            pass
+        return ""
+
+    def _capture_screenshot(self, stream_url: str, name: str) -> str:
         try:
             html = (
                 "<html><head>"
@@ -148,30 +176,18 @@ class CctvTool(Tool):
                 f"if(Hls.isSupported()){{const h=new Hls();h.loadSource('{stream_url}');h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}}"
                 f"else if(v.canPlayType('application/vnd.apple.mpegurl')){{v.src='{stream_url}';v.play();}}"
                 "</script></body></html>"
-            )
+            ).replace("Hls", "Hls")  # no-op, just keeping hls.js ref
+
             import tempfile
             with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
                 f.write(html)
                 tmp_path = f.name
 
             self._browser.run(f"navigate:file://{tmp_path}")
-
-            import time
-            # Take 3 snapshots across 6 seconds to capture the video feed
-            img_paths = []
-            for _ in range(3):
-                time.sleep(2)
-                result = self._browser.run("screenshot")
-                if "Screenshot saved:" in result:
-                    img_paths.append(result.split("Screenshot saved:")[1].strip())
-
-            lines = [
-                f"Camera: {name}",
-                f"Area: {area}",
-            ]
-            for p in img_paths:
-                lines.append(f"[IMAGE:{p}]")
-
-            return "\n".join(lines)
-        except Exception as e:
-            return f"{self._camera_info(cameras, cam['cctv_id'])}\n\nError screenshot: {e}"
+            import time; time.sleep(3)
+            result = self._browser.run("screenshot")
+            if "Screenshot saved:" in result:
+                return result.split("Screenshot saved:")[1].strip()
+        except Exception:
+            pass
+        return ""
