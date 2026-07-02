@@ -1,7 +1,7 @@
 import asyncio
 import re
 
-from telegram import Update, BotCommand
+from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
@@ -88,21 +88,24 @@ class TelegramBot:
         await update.message.reply_text(text)
 
     def run(self):
-        self._app = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
+        async def _post_init(app):
+            await app.bot.set_my_commands([
+                ("help", "Lihat fitur & panduan"),
+                ("start", "Mulai ulang bot"),
+            ])
+
+        self._app = (
+            Application.builder()
+            .token(settings.TELEGRAM_BOT_TOKEN)
+            .post_init(_post_init)
+            .build()
+        )
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
         self._app.add_handler(CommandHandler("help", self._handle_help))
         self._app.add_handler(CommandHandler("start", self._handle_help))
 
         self.scheduler._on_notify = lambda uid, msg: self._send_to_user(f"\u23f0 Pengingat: {msg}")
         self.scheduler.start()
-
-        # Register command suggestions (Telegram auto-complete)
-        async def _set_commands(app):
-            await app.bot.set_my_commands([
-                BotCommand("help", "Lihat fitur & panduan"),
-                BotCommand("start", "Mulai ulang bot"),
-            ])
-        self._app.post_init = _set_commands
 
         if self._bus:
             self._bus.on("watcher.alert", lambda payload, bus: self._send_to_user(f"\U0001f514 {payload['message']}"))
