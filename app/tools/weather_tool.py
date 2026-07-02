@@ -22,14 +22,21 @@ class WeatherTool(Tool):
             return f"Error: {e}"
 
     def _geocode(self, city: str):
-        url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.request.quote(city)}&count=1&language=id"
-        req = urllib.request.Request(url, headers={"User-Agent": "AI-Chief-of-Staff/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        if not data.get("results"):
-            raise ValueError(f"City not found: {city}")
-        r = data["results"][0]
-        return r["latitude"], r["longitude"], r.get("name", city)
+        # ponytail: try full string first, then fall back to last comma-part
+        candidates = [city]
+        if "," in city:
+            candidates.append(city.split(",")[-1].strip())
+
+        for c in candidates:
+            url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.request.quote(c)}&count=1&language=id"
+            req = urllib.request.Request(url, headers={"User-Agent": "AI-Chief-of-Staff/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if data.get("results"):
+                r = data["results"][0]
+                return r["latitude"], r["longitude"], r.get("name", c)
+
+        raise ValueError(f"City not found: {city}")
 
     def _fetch_weather(self, lat, lon):
         url = (

@@ -27,7 +27,8 @@ class TelegramBot:
         self.memory.add(user_id, "user", message)
 
         await update.message.reply_chat_action(ChatAction.TYPING)
-        response = self.agent.chat(user_id, message)
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(None, self.agent.chat, user_id, message)
 
         self.memory.add(user_id, "assistant", response)
 
