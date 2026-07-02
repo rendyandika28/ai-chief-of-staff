@@ -3,6 +3,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import json
 import logging
 import re
 from app.agent.profile import Profile
@@ -51,11 +52,31 @@ class Planner:
             message=message,
         )
         raw = self.llm.chat(messages)
-        # Strip markdown fences if Claude wraps JSON
         raw = raw.strip()
         if "```" in raw:
             raw = re.sub(r'```(?:json)?\s*', '', raw).strip()
+
+        # Try parse JSON. If Claude sends multiple JSON blocks, take only the first.
         data = extract_json(raw)
+        if data is None and "{" in raw:
+            # Grab just the first JSON object
+            start = raw.find("{")
+            depth = 0
+            end = start
+            for i in range(start, len(raw)):
+                if raw[i] == "{":
+                    depth += 1
+                elif raw[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            if end > start:
+                try:
+                    data = json.loads(raw[start:end])
+                except json.JSONDecodeError:
+                    data = None
+
         if data is None or validate(data, self._tool_exists) is not None:
             logger.info(f"Planner natural language: {raw[:100]}")
             return {"action": "chat", "message": raw.strip()}
