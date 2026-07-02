@@ -185,6 +185,10 @@ class Agent:
 
             last_response = response
 
+            # Skip reflection for visual outputs (images/videos) — nothing to "improve"
+            if re.search(r'\[(IMAGE|VIDEO):', response):
+                return response
+
             verdict = self.reflector.reflect(message, response, tool_results if data["action"] != "chat" else "")
             if verdict is None:
                 return response
