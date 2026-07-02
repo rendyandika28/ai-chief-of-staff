@@ -80,20 +80,16 @@ class TelegramBot:
                 pass
 
     def _send_to_user(self, text: str):
-        """Send via sync HTTP — works from any thread, no event loop needed."""
         if self._app is None or self._user_id is None:
-            print(f"[TELEGRAM] Cannot send: app={self._app is not None} user={self._user_id}", flush=True)
             return
         try:
             token = settings.TELEGRAM_BOT_TOKEN
             url = f"https://api.telegram.org/bot{token}/sendMessage"
             data = json.dumps({"chat_id": int(self._user_id), "text": text}).encode()
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                body = resp.read().decode()
-            print(f"[TELEGRAM] Sent OK: {body[:80]}", flush=True)
-        except Exception as e:
-            print(f"[TELEGRAM] Send error: {type(e).__name__}: {e}", flush=True)
+            urllib.request.urlopen(req, timeout=10)
+        except Exception:
+            pass
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
@@ -132,9 +128,8 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("start", self._handle_help))
 
         self.scheduler._on_notify = lambda uid, msg: (
-            print(f"[NOTIFY] reminder for {uid}: {msg[:40]}", flush=True),
-            self._send_to_user(f"\u23f0 Pengingat: {msg}")
-        )[1]
+            self._send_to_user(f"⏰ Eh bro, {msg.lower()}! Jangan lupa ya 😄")
+        )
         self.scheduler.start()
 
         if self._bus:
