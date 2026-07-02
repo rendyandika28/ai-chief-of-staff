@@ -214,10 +214,11 @@ class CctvTool(Tool):
         html = (
             "<html><head>"
             "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
-            "</head><body style='margin:0;background:#000'>"
+            "</head><body style='margin:0;background:red'>"
             "<video id='v' autoplay muted playsinline style='width:100%;height:100vh'></video>"
             "<script>"
             "const v=document.getElementById('v');"
+            "v.addEventListener('loadeddata',()=>{setTimeout(()=>v.play(),2000)});"
             "if(Hls.isSupported()){const h=new Hls();"
             f"h.loadSource('{stream_url}');h.attachMedia(v);"
             "h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}"

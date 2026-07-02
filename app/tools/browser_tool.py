@@ -24,6 +24,8 @@ class PlaywrightSession:
                 "--autoplay-policy=no-user-gesture-required",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
+                "--use-gl=swiftshader",
+                "--enable-webgl",
             ])
         if self._page is None or self._page.is_closed():
             self._page = self._browser.new_page()
