@@ -35,7 +35,10 @@ class TelegramBot:
             response = "Maaf, ada error. Coba lagi nanti."
             print(f"Agent error: {e}")
 
-        self.memory.add(user_id, "assistant", response)
+        # Don't store fallback in memory — confuses LLM next round
+        if response and "Maaf, aku kesulitan" not in response and "Maaf, ada error" not in response:
+        if response and "Maaf, aku kesulitan" not in response and "Maaf, ada error" not in response:
+            self.memory.add(user_id, "assistant", response)
 
         await self._send_response(update, response)
 
