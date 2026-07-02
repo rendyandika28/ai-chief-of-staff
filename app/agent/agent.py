@@ -83,6 +83,22 @@ class Executor:
             return None
         return data.get("message")
 
+    def respond_stream(self, user_message: str, history: list, tool_results: str):
+        """Yields text tokens from Claude streaming for live typing effect."""
+        summary_msg = (
+            f"User tadi minta: \"{user_message}\"\n\n"
+            f"Berikut hasil dari tool yang dijalankan:\n{tool_results}\n\n"
+            "Balas user dengan bahasa natural. Langsung aja, tanpa JSON."
+        )
+        messages = self.builder.build(
+            system_prompt=self._prompt,
+            profile=self.profile.load(),
+            history=history,
+            message=summary_msg,
+        )
+        for token in self.llm.stream(messages, max_tokens=1024):
+            yield token
+
 
 class Reflector:
     """Evaluates whether the response adequately answers the user's question."""
@@ -146,6 +162,14 @@ class Agent:
             return "\n".join(results)
         return ""
 
+    def chat_stream(self, user_id: str, message: str):
+        """Yields text tokens for live typing effect. Streams Executor, simulates chat."""
+        try:
+            yield from self._do_chat_stream(user_id, message)
+        except Exception as e:
+            logging.error(f"Agent stream crash: {e}", exc_info=True)
+            yield "Maaf, ada error internal."
+
     def chat(self, user_id: str, message: str) -> str:
         try:
             return self._do_chat(user_id, message)
@@ -182,6 +206,58 @@ class Agent:
             data = self.planner.plan(message, history, feedback, memories)
             if data is None:
                 return last_response
+
+    def _do_chat_stream(self, user_id: str, message: str):
+        """Streaming version — live typing. Simpler: no reflection loop, single pass."""
+        history = self.memory.get(user_id)
+        history = [h for h in history if "kesulitan memproses" not in h.get("content", "")]
+
+        if len(history) > 15:
+            compressed = self._compress_history(history)
+            history = [{"role": "system", "content": f"Ringkasan: {compressed}"}] + history[-10:]
+
+        memories = []
+        if self.long_term:
+            memories = self.long_term.search(user_id, message, k=3)
+        if self.knowledge_graph:
+            kg = self.knowledge_graph.context_for(user_id, message)
+            if kg:
+                memories = (memories or [])
+                memories.insert(0, {"user": "", "assistant": kg})
+
+        # Plan (non-streaming — we need complete JSON)
+        data = self.planner.plan(message, history, "", memories)
+        if data is None:
+            yield "Maaf, aku kesulitan memproses permintaan itu."
+            return
+
+        if data["action"] == "chat":
+            # Simulate streaming for chat messages
+            text = data.get("message", "")
+            for char in text:
+                yield char
+            return
+
+        # Tool execution
+        tool_results = self._execute_tools(data, user_id)
+        tool_name = data.get("tool", "")
+
+        if tool_name in ("cctv", "traffic", "browser"):
+            # Visual tools: return result directly (no streaming needed)
+            for char in tool_results:
+                yield char
+            return
+
+        # Stream Executor's natural language response
+        full_text = ""
+        for token in self.executor.respond_stream(message, history, tool_results):
+            full_text += token
+            yield token
+
+        # Store in long-term memory + extract facts (best-effort)
+        if self.long_term:
+            self.long_term.add(user_id, message, full_text)
+        self._extract_facts(user_id, message, full_text)
 
     def _compress_history(self, history: list) -> str:
         """Summarize old messages to keep conversation context compact."""

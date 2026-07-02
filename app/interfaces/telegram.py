@@ -1,7 +1,10 @@
 import asyncio
 import json
 import os
+import queue
 import re
+import threading
+import time
 import urllib.request
 
 from telegram import Update, InputMediaPhoto
@@ -31,34 +34,66 @@ class TelegramBot:
         self.memory.add(user_id, "user", message)
 
         await update.message.reply_chat_action(ChatAction.TYPING)
+        sent_msg = await update.message.reply_text("...")
+
+        # Stream tokens via thread-safe queue
+        token_queue = queue.Queue()
+        error_ref = []
+
+        def run_agent():
+            try:
+                for token in self.agent.chat_stream(user_id, message):
+                    token_queue.put(token)
+                token_queue.put(None)  # sentinel
+            except Exception as e:
+                error_ref.append(str(e))
+                token_queue.put(None)
+
         loop = asyncio.get_running_loop()
-        try:
-            response = await loop.run_in_executor(None, self.agent.chat, user_id, message)
-        except Exception as e:
-            response = "Maaf, ada error. Coba lagi nanti."
-            print(f"Agent error: {e}")
+        thread = threading.Thread(target=run_agent, daemon=True)
+        thread.start()
 
-        await self._send_response(update, response)
+        full_text = ""
+        last_update = time.time()
+        while True:
+            try:
+                token = token_queue.get(timeout=0.1)
+            except queue.Empty:
+                # Update message periodically
+                if full_text and time.time() - last_update > 0.2:
+                    try:
+                        await sent_msg.edit_text(full_text + " ...")
+                        last_update = time.time()
+                    except Exception:
+                        pass
+                continue
 
-        # Store in memory — but skip visual tool outputs and fallback
-        if "kesulitan memproses" in response:
-            return
-        if "[VIDEO:" in response or "[IMAGE:" in response:
-            return
-        if response.startswith(("[cctv]", "[traffic]", "[browser]")):
-            return
-        self.memory.add(user_id, "assistant", response.strip())
+            if token is None:
+                break
+            full_text += token
 
-    async def _send_response(self, update: Update, raw: str):
-        text = raw
+        # Final update
+        if error_ref:
+            full_text = "Maaf, ada error. Coba lagi nanti."
+        await sent_msg.edit_text(full_text or "Maaf, ada error. Coba lagi nanti.")
+
+        await sent_msg.edit_text(full_response or "Maaf, ada error. Coba lagi nanti.")
+
+        # Store in memory — skip visual tool outputs and fallback
+        if "kesulitan memproses" in full_text:
+            return
+        if "[VIDEO:" in full_text or "[IMAGE:" in full_text:
+            return
+        if full_text.startswith(("[cctv]", "[traffic]", "[browser]")):
+            return
+        self.memory.add(user_id, "assistant", full_text.strip())
+
+        # Handle visual outputs (images/videos appended to streamed text)
+        await self._send_media(update, full_text)
+
+    async def _send_media(self, update: Update, raw: str):
         image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
         video_paths = re.findall(r'\[VIDEO:(.*?)\]', raw)
-        text = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', text)
-        text = re.sub(r'^\[[a-z_]+\]\s*', '', text)  # strip [tool_name] prefix
-        text = re.sub(r'\n{3,}', '\n\n', text).strip()
-
-        if text:
-            await update.message.reply_text(text)
 
         valid_imgs = [p for p in image_paths if os.path.exists(p)]
         valid_vids = [p for p in video_paths if os.path.exists(p)]
