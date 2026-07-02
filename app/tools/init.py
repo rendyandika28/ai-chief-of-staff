@@ -11,6 +11,7 @@ from app.tools.traffic_tool import TrafficTool
 from app.tools.cctv_tool import CctvTool
 from app.tools.job_hunt_tool import JobHuntTool
 from app.tools.auto_apply_tool import AutoApplyTool
+from app.tools.home_cctv import HomeCctvTool
 
 
 def load_tools(scheduler=None, profile=None):
@@ -29,6 +30,7 @@ def load_tools(scheduler=None, profile=None):
     registry.register("cctv", CctvTool(browser))
     registry.register("job_hunt", JobHuntTool(browser))
     registry.register("auto_apply", AutoApplyTool(browser, profile))
+    registry.register("cctv_home", HomeCctvTool())
 
     if scheduler:
         registry.register("reminder", ReminderTool(scheduler))
