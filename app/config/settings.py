@@ -1,7 +1,4 @@
-from dotenv import load_dotenv
 import os
-
-load_dotenv()
 
 
 class Settings:
@@ -9,6 +6,7 @@ class Settings:
     DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL")
     DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL")
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 
 settings = Settings()

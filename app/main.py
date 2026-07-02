@@ -1,13 +1,11 @@
-from app.agent.agent import Agent
-from app.llm.factory import create_llm
+from app.app import create_core
+from app.interfaces.telegram import TelegramBot
+
 
 def main():
-    llm = create_llm()
-    agent = Agent(llm)
-
-    response = agent.chat("Perkenalkan diri kamu dalam 1 kata.")
-
-    print(response)
+    agent, memory, scheduler, event_bus, goal_manager, watchers = create_core()
+    bot = TelegramBot(agent, memory, scheduler, event_bus, watchers)
+    bot.run()
 
 
 if __name__ == "__main__":

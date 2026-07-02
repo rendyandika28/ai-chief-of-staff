@@ -1,0 +1,172 @@
+import json
+import urllib.request
+import urllib.error
+from datetime import datetime
+
+from app.tools.base import Tool
+
+CCTV_API = "https://cctv.jogjakota.go.id/home/getdata"
+CCTV_MAP = "https://cctv.jogjakota.go.id"
+
+CAMERA_CACHE = None
+
+
+def _fetch_cameras():
+    global CAMERA_CACHE
+    if CAMERA_CACHE is not None:
+        return CAMERA_CACHE
+
+    req = urllib.request.Request(
+        CCTV_API,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        CAMERA_CACHE = json.loads(resp.read().decode("utf-8"))
+    return CAMERA_CACHE
+
+
+class CctvTool(Tool):
+    name = "cctv"
+    description = (
+        "CCTV Jogja network (cctv.jogjakota.go.id). 154 cameras across Yogyakarta. "
+        "Commands: list:<area>, view:<camera_id|area_name>, info:<camera_id>. "
+        "'list' searches by kecamatan, kelurahan, or keyword in title. "
+        "'view' opens the camera and takes a screenshot."
+    )
+
+    def __init__(self, browser_tool=None):
+        self._browser = browser_tool
+
+    def run(self, input: str = "", user_id: str = "") -> str:
+        parts = input.strip().split(":", 1)
+        cmd = parts[0].strip().lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        try:
+            cameras = _fetch_cameras()
+        except Exception as e:
+            return f"Error fetching CCTV data: {e}"
+
+        if cmd == "list":
+            return self._list_cameras(cameras, arg)
+
+        if cmd == "view":
+            return self._view_camera(cameras, arg)
+
+        if cmd == "info":
+            return self._camera_info(cameras, arg)
+
+        return "Commands: list:<area>, view:<id|area>, info:<id>"
+
+    def _match(self, cameras, query):
+        q = query.lower()
+        active = [c for c in cameras if c["cctv_status"] != "2"]
+
+        # ponytail: simple keyword match across all location fields
+        def score(c):
+            text = (
+                f"{c['cctv_title']} {c['kecamatan_nama']} "
+                f"{c['kelurahan_nama']} {c['kampung_nama']}"
+            ).lower()
+            return sum(1 for w in q.split() if w in text)
+
+        scored = [(score(c), c) for c in active]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [c for s, c in scored if s > 0]
+
+    def _list_cameras(self, cameras, query):
+        matched = self._match(cameras, query) if query else cameras[:10]
+
+        if not matched:
+            return f"Tidak ada CCTV ditemukan untuk: {query}"
+
+        lines = []
+        for c in matched[:15]:
+            loc = f"{c['kecamatan_nama']} > {c['kelurahan_nama']}"
+            name = c["cctv_title"]
+            status = {0: "aktif", 1: "private", 2: "rusak"}.get(
+                int(c["cctv_status"]), "?"
+            )
+            lines.append(
+                f"  [{c['cctv_id']}] {name} — {loc} ({status})"
+            )
+
+        return "\n".join(lines)
+
+    def _camera_info(self, cameras, cam_id):
+        cam = None
+        for c in cameras:
+            if c["cctv_id"] == cam_id:
+                cam = c
+                break
+        if not cam:
+            return f"Camera {cam_id} not found"
+
+        return (
+            f"Camera #{cam['cctv_id']}: {cam['cctv_title']}\n"
+            f"  Lokasi: {cam['kecamatan_nama']} > {cam['kelurahan_nama']}"
+            + (f" > {cam['kampung_nama']}" if cam['kampung_nama'] else "") + "\n"
+            f"  Koordinat: {cam['cctv_latitude']}, {cam['cctv_longitude']}\n"
+            f"  Stream: {cam['cctv_link']}\n"
+            f"  Status: {('aktif', 'private', 'rusak')[int(cam['cctv_status'])]}"
+        )
+
+    def _view_camera(self, cameras, arg):
+        cam = None
+        # Try by ID first
+        for c in cameras:
+            if c["cctv_id"] == arg:
+                cam = c
+                break
+
+        # Try by name match
+        if cam is None:
+            matched = self._match(cameras, arg)
+            if matched:
+                cam = matched[0]
+
+        if cam is None:
+            return f"Camera tidak ditemukan: {arg}"
+
+        name = cam["cctv_title"]
+        stream_url = cam["cctv_link"]
+        area = f"{cam['kecamatan_nama']} > {cam['kelurahan_nama']}"
+
+        if self._browser is None:
+            return self._camera_info(cameras, cam["cctv_id"])
+
+        try:
+            html = (
+                "<html><body style='margin:0;background:#000'>"
+                "<video id='v' autoplay muted playsinline style='width:100vw;height:100vh' controls>"
+                f"<source src='{stream_url}' type='application/x-mpegURL'>"
+                "</video>"
+                "<script>"
+                "const v=document.getElementById('v');"
+                "v.play().catch(()=>{});"
+                "</script></body></html>"
+            )
+            data_url = "data:text/html;charset=utf-8," + urllib.request.quote(html)
+
+            self._browser.run(f"navigate:{data_url}")
+
+            ts = datetime.now().strftime("%H%M%S")
+            slug = name.lower().replace(" ", "_")[:30]
+            path = f"memory/cctv_{slug}_{ts}.png"
+
+            import time
+            time.sleep(3)
+            self._browser.run(f"screenshot")
+
+            return (
+                f"Camera: {name}\n"
+                f"Area: {area}\n"
+                f"Stream: {stream_url}\n"
+                f"Lihat peta: {CCTV_MAP}"
+            )
+        except Exception as e:
+            return f"{self._camera_info(cameras, cam['cctv_id'])}\n\nError screenshot: {e}"

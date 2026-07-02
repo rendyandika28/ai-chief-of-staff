@@ -8,3 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+.env
+
+# Data
+memory/conversations.db
+memory/scheduler.db
+memory/long_term.db
+memory/screenshot_*.png
+memory/cctv_*.png
+data/

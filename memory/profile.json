@@ -1,0 +1,81 @@
+{
+  "name": "Rendy Andika",
+  "nickname": "Rendy",
+  "language": "Bahasa Indonesia",
+  "response_style": "Singkat, santai, seperti teman",
+  "role": "Frontend Engineer",
+  "projects": [
+    "AI Chief of Staff",
+    "LMS - sinau.in",
+    "Wedding Invitation - ketemoo.co"
+  ],
+  "contact": {
+    "full_name": "Rendy Andika",
+    "email": "rendyndika@gmail.com",
+    "phone": "+6285175282801",
+    "linkedin": "https://linkedin.com/in/rendyandika",
+    "website": "https://rdydika.dev",
+    "location": "Jakarta, Indonesia"
+  },
+  "skills": [
+    "React.js", "Vue.js", "Next.js", "Nuxt.js", "TypeScript", "JavaScript ES6+",
+    "Tailwind CSS", "Bootstrap", "Vuetify", "HTML5", "CSS3", "SCSS",
+    "Component-Based Architecture", "Performance Optimization",
+    "Payment Gateway Integration", "REST APIs", "OAuth", "Authentication Flows",
+    "Cross-functional Collaboration", "Problem Solving", "Clear Technical Communication"
+  ],
+  "summary": "Frontend Engineer with 5+ years of experience delivering production-grade web applications across education technology, digital identity, banking, e-commerce, logistics, and enterprise operations. Specializes in React.js, Next.js, Vue.js, Nuxt.js, and TypeScript.",
+  "experience": [
+    {
+      "company": "PT Pintar Pemenang Asia",
+      "title": "Frontend Engineer",
+      "period": "03/2026 - Present",
+      "highlights": [
+        "Built core learning platform serving thousands of users — course discovery, enrolments, live classes, certifications, multi-brand deployments",
+        "Developed admin panel with 40+ modules — course/user/billing, reports, gamification, surveys, whitelabel config",
+        "Built multi-tenant job portal — job listing, apply flow with resume validation, screening questions, candidate pipeline"
+      ]
+    },
+    {
+      "company": "PT Bank CIMB Niaga Tbk",
+      "title": "Frontend Engineer",
+      "period": "10/2025 - 12/2025",
+      "highlights": [
+        "Built Training Request system serving 1000+ users — 60% reduction in manual administrative overhead",
+        "Engineered reusable UI component library — 40% improvement in team velocity and 85% code reuse"
+      ]
+    },
+    {
+      "company": "PT Privy Identitas Digital",
+      "title": "Frontend Engineer",
+      "period": "12/2022 - 06/2025",
+      "highlights": [
+        "API Playground platform — 500+ QA testers, 200+ developers, 45% faster validation cycles",
+        "OAuth SSO platform — 10,000+ monthly auth events, 99.9% uptime, <200ms latency",
+        "Document signing web app — 5,000+ documents monthly with full audit trails",
+        "Stripe & Midtrans payment integration — 99.8% transaction success rate, $2M+ annual GMV"
+      ]
+    },
+    {
+      "company": "PT Vodjo Teknologi Indonesia",
+      "title": "Frontend Developer (Freelance)",
+      "period": "09/2020 - 07/2023",
+      "highlights": [
+        "Built 4+ CMS-based web apps for enterprise clients — 99% uptime, sub-2s page loads",
+        "E-commerce platform — $500K+ annual transactions, 10,000+ SKUs",
+        "Logistics tracking system — 98% delivery accuracy, real-time GPS visualization"
+      ]
+    }
+  ],
+  "education": {
+    "degree": "Information System - Bachelor's Degree",
+    "school": "State Islamic University of North Sumatera",
+    "gpa": "3.84 (Cumlaude)",
+    "period": "09/2017 - 04/2022"
+  },
+  "certificates": [
+    "Menjadi Front-End Web Developer Expert - Dicoding Indonesia (06/2021)"
+  ],
+  "languages_spoken": ["Indonesia (Native)", "English (Professional)"],
+  "resume_path": "data/resume.pdf"
+}

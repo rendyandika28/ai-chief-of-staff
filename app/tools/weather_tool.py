@@ -1,0 +1,76 @@
+import json
+import urllib.request
+import urllib.error
+
+from app.tools.base import Tool
+
+
+class WeatherTool(Tool):
+    name = "weather"
+    description = "Get current weather for a city. Input: city name. Uses Open-Meteo (free, no API key)."
+
+    def run(self, input: str = "") -> str:
+        city = input.strip()
+        if not city:
+            return "Error: city name required"
+
+        try:
+            lat, lon, name = self._geocode(city)
+            weather = self._fetch_weather(lat, lon)
+            return f"Cuaca di {name}: {weather}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    def _geocode(self, city: str):
+        url = f"https://geocoding-api.open-meteo.com/v1/search?name={urllib.request.quote(city)}&count=1&language=id"
+        req = urllib.request.Request(url, headers={"User-Agent": "AI-Chief-of-Staff/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if not data.get("results"):
+            raise ValueError(f"City not found: {city}")
+        r = data["results"][0]
+        return r["latitude"], r["longitude"], r.get("name", city)
+
+    def _fetch_weather(self, lat, lon):
+        url = (
+            f"https://api.open-meteo.com/v1/forecast?"
+            f"latitude={lat}&longitude={lon}"
+            f"&current_weather=true"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+            f"&timezone=Asia/Jakarta"
+            f"&forecast_days=1"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "AI-Chief-of-Staff/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        cw = data.get("current_weather", {})
+        daily = data.get("daily", {})
+
+        temp = cw.get("temperature", "?")
+        wind = cw.get("windspeed", "?")
+        code = cw.get("weathercode", 0)
+
+        conditions = {
+            0: "Cerah", 1: "Cerah", 2: "Berawan", 3: "Mendung",
+            45: "Kabut", 48: "Kabut beku",
+            51: "Gerimis ringan", 53: "Gerimis", 55: "Gerimis lebat",
+            61: "Hujan ringan", 63: "Hujan", 65: "Hujan lebat",
+            71: "Salju ringan", 73: "Salju", 75: "Salju lebat",
+            80: "Hujan lokal", 81: "Hujan sedang", 82: "Hujan badai",
+            95: "Badai petir", 96: "Badai+hujan es", 99: "Badai besar+hujan es",
+        }
+        cond = conditions.get(code, f"kode {code}")
+
+        parts = [f"{temp}°C, {cond}, angin {wind} km/jam"]
+
+        if daily:
+            hi = daily.get("temperature_2m_max", [None])[0]
+            lo = daily.get("temperature_2m_min", [None])[0]
+            rain = daily.get("precipitation_probability_max", [None])[0]
+            if hi is not None and lo is not None:
+                parts.append(f"(min {lo}°C / max {hi}°C)")
+            if rain is not None:
+                parts.append(f"kemungkinan hujan {rain}%")
+
+        return " ".join(parts)
