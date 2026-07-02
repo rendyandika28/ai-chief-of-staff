@@ -46,7 +46,7 @@ class Planner:
             history=history,
             message="[RESPOND WITH JSON ONLY]\n\n" + message,
         )
-        raw = self.llm.chat(messages, temperature=0.0)
+        raw = self.llm.chat(messages)
         data = extract_json(raw)
         if data is None or validate(data, self._tool_exists) is not None:
             logging.warning(f"Planner invalid response: {raw[:200]}")
@@ -76,7 +76,7 @@ class Executor:
             history=history,
             message=summary_msg,
         )
-        raw = self.llm.chat(messages, temperature=0.7)
+        raw = self.llm.chat(messages)
         data = extract_json(raw)
         if data is None or data.get("action") != "chat":
             logging.warning(f"Executor invalid response: {raw[:200]}")
@@ -117,7 +117,7 @@ class Reflector:
             {"role": "system", "content": self._prompt},
             {"role": "user", "content": eval_msg},
         ]
-        raw = self.llm.chat(messages, temperature=0.0)
+        raw = self.llm.chat(messages)
         data = extract_json(raw)
         if data is None or validate_verdict(data) is not None:
             return {"verdict": "good", "feedback": "validation failed, defaulting to good"}

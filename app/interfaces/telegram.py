@@ -55,14 +55,19 @@ class TelegramBot:
 
         full_text = ""
         last_update = time.time()
+        last_action = time.time()
         while True:
             try:
-                token = token_queue.get(timeout=0.1)
+                token = token_queue.get(timeout=0.5)
             except queue.Empty:
+                # Keep typing animation alive
+                if time.time() - last_action > 4:
+                    await update.message.reply_chat_action(ChatAction.TYPING)
+                    last_action = time.time()
                 # Update message periodically
-                if full_text and time.time() - last_update > 0.2:
+                if full_text and time.time() - last_update > 0.3:
                     try:
-                        await sent_msg.edit_text(full_text + " ...")
+                        await sent_msg.edit_text(full_text + " ✍️")
                         last_update = time.time()
                     except Exception:
                         pass
