@@ -1,7 +1,11 @@
-"""Knowledge graph — subject-predicate-object triple store with confidence scoring."""
+"""Knowledge graph — subject-predicate-object triple store with confidence scoring
+and automatic cleanup of stale facts."""
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
 from app.lib.database import Database
+
+WIB = timezone(timedelta(hours=7))
 
 
 class KnowledgeGraph:
@@ -71,3 +75,25 @@ class KnowledgeGraph:
             pred = f["predicate"].replace("_", " ")
             lines.append(f"  - {f['subject']} {pred} {f['object']}")
         return "\n".join(lines)
+
+    def cleanup(self):
+        """Remove stale facts. Called periodically to prevent memory bloat."""
+        now = datetime.now(WIB)
+
+        # Decay confidence for facts not updated in 7+ days
+        cutoff = (now - timedelta(days=7)).isoformat()
+        self._db.commit_sql(
+            "UPDATE facts SET confidence = ROUND(confidence * 0.7, 2), updated_at = ? "
+            "WHERE updated_at < ? AND confidence > 0.2",
+            (now.isoformat(), cutoff),
+        )
+
+        # Delete facts with confidence < 0.2 (forgotten)
+        self._db.commit_sql("DELETE FROM facts WHERE confidence < 0.2")
+
+        # Delete facts older than 30 days with low confidence
+        stale = (now - timedelta(days=30)).isoformat()
+        self._db.commit_sql(
+            "DELETE FROM facts WHERE created_at < ? AND confidence < 0.6",
+            (stale,),
+        )

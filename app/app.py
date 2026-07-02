@@ -39,7 +39,8 @@ def create_core():
         from datetime import datetime, timedelta, timezone
         now = datetime.now(timezone(timedelta(hours=7)))
         if 7 <= now.hour <= 9:
-            facts = knowledge_graph.about("system", "Rendy")
+            knowledge_graph.cleanup()  # self-clean stale facts
+            facts = knowledge_graph.about("507090539", "Rendy")
             extra = ""
             if facts:
                 recent = [f for f in facts if f.get("predicate") in ("meeting_with", "deadline", "health_status")]
