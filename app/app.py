@@ -24,7 +24,7 @@ def create_core():
     # Haiku (fast/cheap) for planner + compression + facts
     fast_llm = ClaudeLLM(model="claude-haiku-4-5-20251001")
     # Sonnet (smart) for executor natural conversation
-    smart_llm = ClaudeLLM()
+    smart_llm = ClaudeLLM(model="claude-sonnet-5")
 
     memory = Memory()
     long_term = LongTermMemory()

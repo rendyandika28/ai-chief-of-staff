@@ -78,8 +78,10 @@ class Planner:
                     data = None
 
         if data is None or validate(data, self._tool_exists) is not None:
-            logger.info(f"Planner natural language: {raw[:100]}")
-            return {"action": "chat", "message": raw.strip()}
+            # Strip any JSON residue from raw before using as chat
+            clean = re.sub(r'\{.*?\}', '', raw).strip()
+            logger.info(f"Planner natural language: {clean[:100]}")
+            return {"action": "chat", "message": clean if clean else raw.strip()}
         return data
 
 
