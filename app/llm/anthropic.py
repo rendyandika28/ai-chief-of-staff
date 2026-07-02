@@ -21,7 +21,6 @@ class ClaudeLLM:
     def stream(self, messages: list, max_tokens: int = 4096):
         try:
             kwargs = self._build_kwargs(messages, max_tokens)
-            kwargs["stream"] = True
             with self.client.messages.stream(**kwargs) as stream:
                 for text in stream.text_stream:
                     yield text
