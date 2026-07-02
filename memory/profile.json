@@ -77,5 +77,11 @@
     "Menjadi Front-End Web Developer Expert - Dicoding Indonesia (06/2021)"
   ],
   "languages_spoken": ["Indonesia (Native)", "English (Professional)"],
-  "resume_path": "data/resume.pdf"
+  "resume_path": "data/resume.pdf",
+  "job_preferences": {
+    "roles": ["frontend engineer", "react developer", "vue developer", "senior frontend"],
+    "preferred_location": "remote",
+    "avoid_location": "indonesia",
+    "notes": "Avoid jobs requiring BPJS (double employment detection). Prefer international remote or freelance contracts."
+  }
 }

@@ -54,11 +54,15 @@ def create_core():
 
     watchers.register(morning_check, 3600)  # check hourly
 
-    # Job scraper — every 6 hours
+    # Job scraper — every 6 hours, respects profile preferences
     def job_scraper():
+        from app.agent.profile import Profile
+        prefs = Profile().raw().get("job_preferences", {})
+        role = prefs.get("roles", ["frontend engineer"])[0]
+        loc = prefs.get("preferred_location", "remote")
         job_tool = agent.tools.get("job_hunt")
         if job_tool:
-            return job_tool.run("report:frontend engineer|remote") or None
+            return job_tool.run(f"report:{role}|{loc}") or None
         return None
 
     watchers.register(job_scraper, 21600)  # every 6 hours

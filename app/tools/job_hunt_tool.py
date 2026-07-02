@@ -114,24 +114,29 @@ class JobHuntTool(Tool):
         contact = self._profile.contact() if self._profile else {}
         summary = self._profile.raw().get("summary", "")[:200] if self._profile else ""
 
+        prefs = self._profile.raw().get("job_preferences", {}) if self._profile else {}
+        pref_notes = prefs.get("notes", "")
+
         lines = [f"🔔 TOP {len(top)} lowongan '{role}' di {location}:\n"]
         for j in top:
             jurl = j.get("url") or f"https://www.google.com/search?q={urllib.request.quote(j['title'])}+apply"
+            contract_note = " (Prefer contract/freelance remote — no BPJS)" if pref_notes else ""
             lines.append(
                 f"{'─'*40}\n"
                 f"📌 {j['title']}\n"
-                f"   Score CV match: {j['score']} | ID: [{j.get('id','?')}]\n"
-                f"   URL: {jurl}\n\n"
+                f"   Score: {j['score']} | ID: [{j.get('id','?')}]\n"
+                f"   URL: {jurl}{contract_note}\n\n"
                 f"📝 Cover Letter:\n"
                 f"Dear Hiring Manager,\n\n"
                 f"I'm writing to apply for the {j['title']} position. "
-                f"With 5+ years as Frontend Engineer specializing in React, Vue, Next.js, TypeScript, "
-                f"and payment integrations, I've delivered production apps serving thousands of users. "
-                f"{summary}\n\n"
-                f"I'd welcome the opportunity to discuss how my experience can contribute to your team.\n\n"
+                f"With 5+ years as Frontend Engineer (React, Vue, Next.js, TypeScript), "
+                f"I've built production apps across edtech, banking, e-commerce, and digital identity. "
+                f"I'm seeking a remote contract/freelance arrangement. "
+                f"{summary[:100]}\n\n"
+                f"Portfolio: {contact.get('website','')}\n"
+                f"LinkedIn: {contact.get('linkedin','')}\n\n"
                 f"Best regards,\n{contact.get('full_name','Rendy Andika')}\n"
                 f"{contact.get('email','')} | {contact.get('phone','')}\n"
-                f"{contact.get('linkedin','')}\n"
             )
         lines.append("Ketik 'mark_applied:<id>' setelah apply biar gak duplikat.")
         return "\n".join(lines)
