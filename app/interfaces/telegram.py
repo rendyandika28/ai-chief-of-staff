@@ -1,6 +1,8 @@
 import asyncio
+import json
 import os
 import re
+import urllib.request
 
 from telegram import Update, InputMediaPhoto
 from telegram.constants import ChatAction
@@ -18,7 +20,6 @@ class TelegramBot:
         self._watchers = watchers
         self._app = None
         self._user_id = None
-        self._loop = None
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.message.from_user.id)
@@ -78,17 +79,18 @@ class TelegramBot:
                 pass
 
     def _send_to_user(self, text: str):
-        if self._app is None or self._user_id is None or self._loop is None:
-            print(f"[TELEGRAM] Cannot send: app={self._app is not None} user={self._user_id} loop={self._loop is not None}", flush=True)
+        """Send via sync HTTP — works from any thread, no event loop needed."""
+        if self._app is None or self._user_id is None:
+            print(f"[TELEGRAM] Cannot send: app={self._app is not None} user={self._user_id}", flush=True)
             return
         try:
-            print(f"[TELEGRAM] Sending to {self._user_id}: {text[:50]}", flush=True)
-            future = asyncio.run_coroutine_threadsafe(
-                self._app.bot.send_message(chat_id=int(self._user_id), text=text),
-                self._loop,
-            )
-            result = future.result(timeout=5)
-            print(f"[TELEGRAM] Sent OK: {result}", flush=True)
+            token = settings.TELEGRAM_BOT_TOKEN
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            data = json.dumps({"chat_id": int(self._user_id), "text": text}).encode()
+            req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = resp.read().decode()
+            print(f"[TELEGRAM] Sent OK: {body[:80]}", flush=True)
         except Exception as e:
             print(f"[TELEGRAM] Send error: {type(e).__name__}: {e}", flush=True)
 
@@ -113,7 +115,6 @@ class TelegramBot:
 
     def run(self):
         async def _post_init(app):
-            self._loop = asyncio.get_running_loop()
             await app.bot.set_my_commands([
                 ("help", "Lihat fitur & panduan"),
                 ("start", "Mulai ulang bot"),

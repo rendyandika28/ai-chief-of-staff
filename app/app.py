@@ -30,4 +30,20 @@ def create_core():
 
     watchers = WatcherManager(event_bus)
 
+    # Morning check-in watcher (7-9 AM WIB)
+    def morning_check():
+        from datetime import datetime, timedelta, timezone
+        now = datetime.now(timezone(timedelta(hours=7)))
+        if 7 <= now.hour <= 9:
+            facts = knowledge_graph.about("system", "Rendy")
+            extra = ""
+            if facts:
+                recent = [f for f in facts if f.get("predicate") in ("meeting_with", "deadline", "health_status")]
+                if recent:
+                    extra = f" Lo ada {recent[0]['predicate'].replace('_',' ')} {recent[0]['object']}."
+            return f"Selamat pagi! Udah bangun?{extra}"
+        return None
+
+    watchers.register(morning_check, 3600)  # check hourly
+
     return agent, memory, scheduler, event_bus, goal_manager, watchers
