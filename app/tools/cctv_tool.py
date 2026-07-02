@@ -1,7 +1,8 @@
 import json
+import logging
 import math
 import os
-import subprocess
+import time
 import urllib.request
 import urllib.parse
 
@@ -201,34 +202,61 @@ class CctvTool(Tool):
 
         lines = [f"Camera: {name}", f"Area: {area}"]
 
-        # Try ffmpeg first for 5-second video clip
-        video_path = self._capture_video(stream_url, name)
+        video_path = self._capture_video_browser(stream_url, name)
         if video_path:
             lines.append(f"[VIDEO:{video_path}]")
-
-        # Fallback: single screenshot if no ffmpeg
-        if not video_path and self._browser:
+        elif self._browser:
             img = self._capture_screenshot(stream_url, name)
             if img:
                 lines.append(f"[IMAGE:{img}]")
 
         return "\n".join(lines)
 
-    def _capture_video(self, stream_url: str, name: str) -> str:
-        slug = name.lower().replace(" ", "_")[:20]
-        out = f"memory/cctv_{slug}.mp4"
-        os.makedirs("memory", exist_ok=True)
+    def _capture_video_browser(self, stream_url: str, name: str) -> str:
+        """Capture 10s video via Playwright screen recording with HLS.js player."""
+        if self._browser is None:
+            return ""
 
         try:
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", stream_url, "-t", "10", "-c", "copy",
-                 "-loglevel", "error", out],
-                timeout=15, capture_output=True,
+            # Access the underlying Playwright browser
+            browser = self._browser._session._browser if hasattr(self._browser, '_session') else None
+            if browser is None:
+                return ""
+
+            slug = name.lower().replace(" ", "_")[:20]
+            video_dir = f"memory/video_{slug}"
+            os.makedirs(video_dir, exist_ok=True)
+
+            context = browser.new_context(
+                record_video_dir=video_dir,
+                record_video_size={"width": 1280, "height": 720},
             )
-            if os.path.exists(out) and os.path.getsize(out) > 1000:
+            page = context.new_page()
+
+            html = (
+                f"<html><head>"
+                f"<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
+                f"</head><body style='margin:0;background:#000'>"
+                f"<video id='v' autoplay muted playsinline style='width:100vw;height:100vh'></video>"
+                f"<script>"
+                f"const v=document.getElementById('v');"
+                f"if(Hls.isSupported()){{const h=new Hls();h.loadSource('{stream_url}');"
+                f"h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}}"
+                f"</script></body></html>"
+            )
+            page.set_content(html, timeout=15000)
+            time.sleep(12)  # buffer + 10s capture
+
+            context.close()
+
+            import glob
+            videos = sorted(glob.glob(f"{video_dir}/*.webm"))
+            if videos:
+                out = f"memory/cctv_{slug}.mp4"
+                os.rename(videos[-1], out)
                 return out
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-            pass
+        except Exception as e:
+            logging.error(f"CCTV video capture error: {e}")
         return ""
 
     def _capture_screenshot(self, stream_url: str, name: str) -> str:
@@ -251,7 +279,7 @@ class CctvTool(Tool):
                 tmp_path = f.name
 
             self._browser.run(f"navigate:file://{tmp_path}")
-            import time; time.sleep(3)
+            time.sleep(4)
             result = self._browser.run("screenshot")
             if "Screenshot saved:" in result:
                 return result.split("Screenshot saved:")[1].strip()

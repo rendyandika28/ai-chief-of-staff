@@ -17,4 +17,5 @@ memory/long_term.db
 memory/screenshot_*.png
 memory/cctv_*.png
 memory/cctv_*.mp4
+memory/video_*/
 data/
