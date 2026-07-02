@@ -28,9 +28,10 @@ class JobHuntTool(Tool):
         "Cari lowongan. Commands: search:<role>|<lokasi>, diff:<role>|<lokasi>, detail:<index>, saved"
     )
 
-    def __init__(self):
+    def __init__(self, profile=None):
         self._playwright = None
         self._browser = None
+        self._profile = profile
 
     def _ensure_browser(self):
         if self._playwright is None:
@@ -51,11 +52,13 @@ class JobHuntTool(Tool):
             return self._search(arg)
         if cmd == "diff":
             return self._diff_and_report(arg)
+        if cmd == "apply":
+            return self._apply(arg, user_id)
         if cmd == "detail":
             return self._detail(arg)
         if cmd == "saved":
             return self._saved()
-        return "Commands: search:<role>|<location>, diff:<role>|<location>, detail:<index>, saved"
+        return "Commands: search:<role>|<location>, diff:<role>|<location>, apply:<index>, detail:<index>, saved"
 
     def _search(self, arg: str) -> str:
         role, _, location = arg.partition("|")
@@ -105,7 +108,89 @@ class JobHuntTool(Tool):
             lines = [f"🔔 {len(new_jobs)} lowongan BARU '{role}' di {location}:"]
             for j in new_jobs[:8]:
                 lines.append(f"  - {j['title']}" + (f" — {j.get('company','')}" if j.get('company') else ""))
-            return "\n".join(lines)
+        return "\n".join(lines)
+
+    def _apply(self, arg: str, user_id: str = "") -> str:
+        """Navigate to job, find apply link, fill form from profile."""
+        try:
+            idx = int(arg)
+        except ValueError:
+            return "Error: index must be a number"
+
+        jobs = self._load_jobs()
+        if idx < 0 or idx >= len(jobs):
+            return f"Index {idx} out of range (0-{len(jobs)-1})"
+
+        job = jobs[idx]
+        title = job.get("title", "")
+        url = job.get("url", "")
+
+        if not url:
+            # Search Google for the job title + apply
+            search_url = f"https://www.google.com/search?q={urllib.request.quote(title)}+apply"
+            browser = self._ensure_browser()
+            page = browser.new_page()
+            try:
+                page.goto(search_url, wait_until="domcontentloaded", timeout=15000)
+                import time
+                time.sleep(2)
+                links = page.evaluate("""() => {
+                    return Array.from(document.querySelectorAll('a[href*="linkedin"]'))
+                        .map(a => a.href).slice(0, 3);
+                }""")
+                if not links:
+                    links = page.evaluate("""() => {
+                        return Array.from(document.querySelectorAll('a'))
+                            .filter(a => /apply|job|career/i.test(a.href + a.textContent))
+                            .map(a => a.href).slice(0, 3);
+                    }""")
+                if links:
+                    url = links[0]
+            finally:
+                page.close()
+
+        if not url:
+            return f"Tidak bisa menemukan link apply untuk: {title}\nCari manual: {search_url}"
+
+        # Navigate to apply page
+        browser = self._ensure_browser()
+        page = browser.new_page()
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            import time
+            time.sleep(3)
+
+            # Try to find and fill form fields
+            filled = []
+            if self._profile:
+                contact = self._profile.contact()
+                # Try common field patterns
+                field_map = {
+                    "full_name": [r'full.?name', r'nama.?lengkap', r'first.?name'],
+                    "email": [r'email', r'e-mail'],
+                    "phone": [r'phone', r'mobile', r'telp'],
+                    "website": [r'website', r'portfolio', r'linkedin'],
+                }
+                for key, patterns in field_map.items():
+                    value = contact.get(key, "")
+                    if not value:
+                        continue
+                    for pat in patterns:
+                        try:
+                            page.fill(f"input[name*='{pat}' i]", value, timeout=2000)
+                            filled.append(key)
+                            break
+                        except Exception:
+                            pass
+
+            return (
+                f"Mencoba apply: [{job['id']}] {title}\n"
+                f"URL: {url}\n"
+                + (f"Field terisi: {', '.join(filled)}\n" if filled else "")
+                + "Silakan cek dan submit manual. Ketik 'apply submit' untuk submit otomatis."
+            )
+        finally:
+            page.close()
         return f"Scraping {now.strftime('%H:%M')}: 0 lowongan baru. Total {len(existing)} tersimpan."
 
     def _scrape_google(self, role: str, location: str) -> list:

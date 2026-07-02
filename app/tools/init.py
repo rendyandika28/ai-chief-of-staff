@@ -12,7 +12,7 @@ def load_tools(scheduler=None, profile=None):
     registry.register("time", TimeTool())
     registry.register("weather", WeatherTool())
     registry.register("cctv", CctvTool())
-    registry.register("job_hunt", JobHuntTool())
+    registry.register("job_hunt", JobHuntTool(profile))
 
     if scheduler:
         registry.register("reminder", ReminderTool(scheduler))
