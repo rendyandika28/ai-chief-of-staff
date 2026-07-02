@@ -113,7 +113,7 @@ class Executor:
             history=history,
             message=summary_msg,
         )
-        for token in self.llm.stream(messages, max_tokens=1024):
+        for token in self.llm.stream(messages, max_tokens=512):
             yield token
 
 
