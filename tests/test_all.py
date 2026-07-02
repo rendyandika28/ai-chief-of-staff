@@ -9,8 +9,9 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 # Force clean state
+TEST_DB = "memory/_test_scheduler.db"
 for f in ["memory/conversations.db", "memory/goals.db", "memory/knowledge.db",
-           "memory/scheduler.db", "memory/long_term.db"]:
+           "memory/scheduler.db", "memory/long_term.db", TEST_DB]:
     Path(f).unlink(missing_ok=True)
 
 errors = []
@@ -293,7 +294,7 @@ print("\n>>> 4. Scheduler")
 with test("Scheduler delay + fire"):
     from app.agent.scheduler import Scheduler
     calls = []
-    s = Scheduler(on_notify=lambda uid, msg: calls.append(msg))
+    s = Scheduler(on_notify=lambda uid, msg: calls.append(msg), db_path=TEST_DB)
     s.add("u1", "test reminder", delay_seconds=1)
     s.start()
     time.sleep(3)
@@ -357,7 +358,7 @@ with test("File tool sandbox"):
 with test("Reminder parse + format"):
     from app.agent.scheduler import Scheduler
     from app.tools.reminder_tool import ReminderTool
-    s = Scheduler()
+    s = Scheduler(db_path=TEST_DB)
     r = ReminderTool(s)
     out = r.run("delay:60:test", user_id="u1")
     assert "Error" not in out
@@ -439,7 +440,7 @@ with test("Knowledge graph empty query"):
     assert ctx == ""
 
 with test("Scheduler no callback"):
-    s = Scheduler()
+    s = Scheduler(db_path=TEST_DB)
     s.add("u1", "test", delay_seconds=1)
     s.start()
     time.sleep(2)
@@ -463,7 +464,7 @@ with test("Calculator invalid expression"):
 with test("Reminder invalid format"):
     from app.agent.scheduler import Scheduler
     from app.tools.reminder_tool import ReminderTool
-    r = ReminderTool(Scheduler())
+    r = ReminderTool(Scheduler(db_path=TEST_DB))
     assert "Error" in r.run("invalid", user_id="u1")
     assert "Error" in r.run("delay:abc:test", user_id="u1")
 
