@@ -36,9 +36,12 @@ class TelegramBot:
             response = "Maaf, ada error. Coba lagi nanti."
             print(f"Agent error: {e}")
 
-        # Don't store fallback in memory — confuses LLM next round
-        if response and "Maaf, aku kesulitan" not in response and "Maaf, ada error" not in response:
-            self.memory.add(user_id, "assistant", response)
+        # Don't store fallback or tool output markers in memory — confuse LLM
+        if response and "kesulitan memproses" not in response:
+            clean = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', response)
+            clean = re.sub(r'^\[[a-z_]+\]\s*', '', clean)
+            clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
+            self.memory.add(user_id, "assistant", clean)
 
         await self._send_response(update, response)
 
@@ -46,8 +49,9 @@ class TelegramBot:
         text = raw
         image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
         video_paths = re.findall(r'\[VIDEO:(.*?)\]', raw)
-        text = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', text).strip()
-        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', text)
+        text = re.sub(r'^\[[a-z_]+\]\s*', '', text)  # strip [tool_name] prefix
+        text = re.sub(r'\n{3,}', '\n\n', text).strip()
 
         if text:
             await update.message.reply_text(text)
