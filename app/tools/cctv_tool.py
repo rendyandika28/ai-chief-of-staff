@@ -51,8 +51,8 @@ class CctvTool(Tool):
         "'view' captures a 10-second video clip from the camera."
     )
 
-    def __init__(self, browser_tool=None):
-        self._browser = browser_tool
+    def __init__(self):
+        pass
 
     def run(self, input: str = "", user_id: str = "") -> str:
         parts = input.strip().split(":", 1)

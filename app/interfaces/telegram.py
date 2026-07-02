@@ -90,7 +90,7 @@ class TelegramBot:
             return
         if "[VIDEO:" in full_text or "[IMAGE:" in full_text:
             return
-        if full_text.startswith(("[cctv]", "[traffic]", "[browser]")):
+        if full_text.startswith("[cctv]"):
             return
         self.memory.add(user_id, "assistant", full_text.strip())
 
@@ -136,14 +136,9 @@ class TelegramBot:
             "Fitur:\n"
             "- Chat natural (ngobrol biasa)\n"
             "- Weather (cuaca kota)\n"
-            "- Browser (browsing web)\n"
-            "- Job hunt (cari lowongan multi-platform)\n"
             "- CCTV Jogja (pantau lalu lintas)\n"
-            "- Reminder (pengingat otomatis)\n"
-            "- File management\n"
-            "- HTTP requests\n"
-            "- Calculator\n"
-            "- Auto-apply job\n\n"
+            "- Job hunt (cari lowongan multi-platform)\n"
+            "- Reminder (pengingat otomatis)\n\n"
             "Commands: /help /start"
         )
         await update.message.reply_text(text)

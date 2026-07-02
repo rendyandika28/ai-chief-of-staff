@@ -30,8 +30,8 @@ class JobHuntTool(Tool):
         "saved — list saved jobs."
     )
 
-    def __init__(self, browser_tool=None):
-        self._browser = browser_tool
+    def __init__(self):
+        pass
 
     def run(self, input: str = "", user_id: str = "") -> str:
         parts = input.strip().split(":", 1)
@@ -72,30 +72,7 @@ class JobHuntTool(Tool):
             )
             lines.append(f"[{platform}] {url}")
 
-        if self._browser:
-            try:
-                google_url = PLATFORMS["google"].format(
-                    role=urllib.request.quote(role),
-                    loc=urllib.request.quote(location),
-                )
-                nav = self._browser.run(f"navigate:{google_url}")
-                content = self._browser.run("content")
-
-                listings = self._parse_google_jobs(content)
-                if listings:
-                    saved = self._save_jobs(listings)
-                    lines.append(f"\n{len(saved)} lowongan ditemukan & disimpan.")
-                    for i, job in enumerate(saved[:10]):
-                        lines.append(
-                            f"  [{i}] {job['title']} — {job['company']}"
-                            + (f" ({job.get('location', '')})" if job.get('location') else "")
-                        )
-                else:
-                    lines.append("\nTidak ada hasil dari Google Jobs. Coba link di atas manual.")
-            except Exception as e:
-                lines.append(f"\nError browser: {e}. Gunakan link di atas manual.")
-        else:
-            lines.append("\nBuka link di atas untuk mencari lowongan.")
+        lines.append("\nBuka link di atas untuk mencari lowongan.")
 
         return "\n".join(lines)
 

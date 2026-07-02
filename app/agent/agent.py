@@ -196,7 +196,7 @@ class Agent:
         tool_results = self._execute_tools(data, user_id)
         tool_name = data.get("tool", "")
 
-        if tool_name in ("cctv", "traffic", "browser"):
+        if tool_name == "cctv":
             for char in tool_results:
                 yield char
             return
