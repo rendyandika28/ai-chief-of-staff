@@ -82,6 +82,9 @@ class TelegramBot:
             full_text = "Maaf, ada error. Coba lagi nanti."
         await sent_msg.edit_text(full_text or "Maaf, ada error. Coba lagi nanti.")
 
+        # Handle visual outputs FIRST — before memory filter
+        await self._send_media(update, full_text)
+
         # Store in memory — skip visual tool outputs and fallback
         if "kesulitan memproses" in full_text:
             return
@@ -90,9 +93,6 @@ class TelegramBot:
         if full_text.startswith(("[cctv]", "[traffic]", "[browser]")):
             return
         self.memory.add(user_id, "assistant", full_text.strip())
-
-        # Handle visual outputs (images/videos appended to streamed text)
-        await self._send_media(update, full_text)
 
     async def _send_media(self, update: Update, raw: str):
         image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
