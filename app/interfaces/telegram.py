@@ -38,13 +38,14 @@ class TelegramBot:
             response = "Maaf, ada error. Coba lagi nanti."
             print(f"Agent error: {e}")
 
-        # Don't store tool outputs or fallback — LLM parrots them
-        if response and "kesulitan memproses" not in response:
-            clean = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', response)
-            clean = re.sub(r'^\[[a-z_]+\]\s*', '', clean)
-            clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
-            if clean and not clean.startswith(("Camera:", "Area:", "Lalu lintas:")):
-                self.memory.add(user_id, "assistant", clean)
+        # Never store visual tool outputs or fallback in memory — LLM contamination
+        if "kesulitan memproses" in response:
+            return
+        if "[VIDEO:" in response or "[IMAGE:" in response:
+            return
+        if response.startswith(("[cctv]", "[traffic]", "[browser]")):
+            return
+        self.memory.add(user_id, "assistant", response.strip())
 
         await self._send_response(update, response)
 
