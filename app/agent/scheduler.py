@@ -46,7 +46,6 @@ class Scheduler:
             "INSERT INTO tasks (user_id, message, run_at, interval_seconds) VALUES (?, ?, ?, ?)",
             (user_id, message, run_at, interval),
         )
-        print(f"[SCHEDULER] Added task: {message} at {run_at}", flush=True)
 
     @staticmethod
     def calc_at(iso: str) -> str:
@@ -80,13 +79,10 @@ class Scheduler:
 
     def _get_due(self):
         now = datetime.now(WIB).isoformat()
-        tasks = self._db.fetch(
+        return self._db.fetch(
             "SELECT id, user_id, message, interval_seconds FROM tasks WHERE status='pending' AND run_at <= ?",
             (now,),
         )
-        if tasks:
-            print(f"[SCHEDULER] Found {len(tasks)} due tasks (now={now[:19]})", flush=True)
-        return tasks
 
     def _mark_done(self, task_id: int):
         self._db.commit_sql("UPDATE tasks SET status='done' WHERE id=?", (task_id,))
@@ -100,15 +96,14 @@ class Scheduler:
             try:
                 for task in self._get_due():
                     task_id, user_id, message, interval = task
-                    print(f"[SCHEDULER] Firing task {task_id}: {message} for user {user_id}", flush=True)
                     if self._on_notify:
                         self._on_notify(user_id, message)
                     if interval:
                         self._reschedule(task_id, interval)
                     else:
                         self._mark_done(task_id)
-            except Exception as e:
-                print(f"[SCHEDULER] Error: {e}", flush=True)
+            except Exception:
+                pass
             time.sleep(1)
 
     def start(self):
