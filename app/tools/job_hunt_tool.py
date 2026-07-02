@@ -1,22 +1,21 @@
-"""Job search tool — scrapes Google Jobs via Playwright, saves listings, supports detail view."""
+"""Job search — scrapes Google Jobs via Playwright, diffs new listings, saves to DB."""
 
 import json
-import re
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from app.tools.base import Tool
+
+WIB = timezone(timedelta(hours=7))
 
 PLATFORMS = {
     "linkedin": "https://www.linkedin.com/jobs/search/?keywords={role}&location={loc}",
     "glints": "https://glints.com/id/opportunities/jobs/explore?keyword={role}&locationName={loc}",
     "indeed": "https://id.indeed.com/jobs?q={role}&l={loc}",
-    "google": "https://www.google.com/search?q={role}+jobs+{loc}&ibp=htl;jobs",
+    "google": "https://www.google.com/search?q={role}+jobs+{loc}&ibp=htl;jobs&tbs=qdr:w",
     "wellfound": "https://wellfound.com/jobs?keywords={role}&location={loc}",
-    "glassdoor": "https://www.glassdoor.com/Job/jobs.htm?sc.keyword={role}&sc.location={loc}",
-    "jobstreet": "https://www.jobstreet.co.id/{role}-jobs/in-{loc}",
-    "kalibrr": "https://www.kalibrr.com/id-ID/search?query={role}&location={loc}",
 }
 
 JOB_DB = Path("data/jobs.json")
@@ -26,7 +25,7 @@ JOB_DB.parent.mkdir(parents=True, exist_ok=True)
 class JobHuntTool(Tool):
     name = "job_hunt"
     description = (
-        "Cari lowongan. Commands: search:<role>|<lokasi>, detail:<index>, saved, apply:<index>"
+        "Cari lowongan. Commands: search:<role>|<lokasi>, diff:<role>|<lokasi>, detail:<index>, saved"
     )
 
     def __init__(self):
@@ -50,81 +49,96 @@ class JobHuntTool(Tool):
 
         if cmd == "search":
             return self._search(arg)
+        if cmd == "diff":
+            return self._diff_and_report(arg)
         if cmd == "detail":
             return self._detail(arg)
         if cmd == "saved":
             return self._saved()
-        return "Commands: search:<role>|<location>, detail:<index>, saved"
+        return "Commands: search:<role>|<location>, diff:<role>|<location>, detail:<index>, saved"
 
     def _search(self, arg: str) -> str:
         role, _, location = arg.partition("|")
         role = role.strip()
         location = location.strip() or "Remote"
-
         if not role:
-            return "Error: role required (contoh: search:frontend engineer|jakarta)"
+            return "Error: role required"
 
         lines = [f"Lowongan '{role}' di '{location}':\n"]
-
-        # Scrape Google Jobs via Playwright
         try:
             listings = self._scrape_google(role, location)
             if listings:
-                saved = self._save_jobs(listings)
-                lines.append(f"{len(saved)} lowongan ditemukan:\n")
-                for i, job in enumerate(saved[-15:]):
-                    idx = len(self._load_jobs()) - len(saved) + i
-                    comp = job.get("company", "?")
-                    loc = job.get("location", "")
-                    lines.append(f"  [{idx}] {job['title']} — {comp}" + (f" ({loc})" if loc else ""))
+                self._save_jobs(listings)
+                jobs = self._load_jobs()
+                lines.append(f"{len(listings)} ditemukan:\n")
+                for j in jobs[-15:]:
+                    lines.append(f"  [{j['id']}] {j['title']} — {j.get('company','?')}")
             else:
-                lines.append("Tidak ada hasil scraping. Link alternatif:\n")
+                lines.append("Tidak ada hasil.\n")
         except Exception as e:
-            lines.append(f"Scraping error: {e}\nLink alternatif:\n")
-
-        # Add platform URLs as backup
-        for platform, url_template in PLATFORMS.items():
-            url = url_template.format(
-                role=urllib.request.quote(role),
-                loc=urllib.request.quote(location),
-            )
-            lines.append(f"  [{platform}] {url}")
-
+            lines.append(f"Scraping error: {e}\n")
+        for p, url in PLATFORMS.items():
+            lines.append(f"  [{p}] {url.format(role=urllib.request.quote(role), loc=urllib.request.quote(location))}")
         return "\n".join(lines)
+
+    def _diff_and_report(self, arg: str) -> str:
+        role, _, location = arg.partition("|")
+        role = role.strip()
+        location = location.strip() or "Remote"
+        if not role:
+            return "Error: role required"
+        try:
+            fresh = self._scrape_google(role, location)
+        except Exception as e:
+            return f"Scraping error: {e}"
+
+        existing = self._load_jobs()
+        existing_titles = {j.get("title", "").lower() for j in existing}
+        new_jobs = [j for j in fresh if j["title"].lower() not in existing_titles]
+
+        now = datetime.now(WIB)
+        for job in fresh:
+            job["scraped_at"] = now.isoformat()
+
+        if new_jobs:
+            self._save_jobs(new_jobs)
+            lines = [f"🔔 {len(new_jobs)} lowongan BARU '{role}' di {location}:"]
+            for j in new_jobs[:8]:
+                lines.append(f"  - {j['title']}" + (f" — {j.get('company','')}" if j.get('company') else ""))
+            return "\n".join(lines)
+        return f"Scraping {now.strftime('%H:%M')}: 0 lowongan baru. Total {len(existing)} tersimpan."
 
     def _scrape_google(self, role: str, location: str) -> list:
         browser = self._ensure_browser()
         page = browser.new_page()
         page.set_viewport_size({"width": 1280, "height": 900})
-
         try:
             url = PLATFORMS["google"].format(
                 role=urllib.request.quote(role),
                 loc=urllib.request.quote(location),
             )
             page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            import time; time.sleep(2)
+            import time
+            time.sleep(2)
             content = page.inner_text("body")
         finally:
             page.close()
 
         jobs = []
         seen = set()
-
-        # Parse Google Jobs listing format
         for line in content.split("\n"):
             line = line.strip()
-            if not line or len(line) < 5 or len(line) > 150:
+            if not line or len(line) < 5 or len(line) > 120:
                 continue
             if line.lower() in seen:
                 continue
-            # Filter: titles usually 5-80 chars, contain job-related keywords
-            if any(w in line.lower() for w in ("engineer", "developer", "manager", "designer",
-                   "analyst", "lead", "senior", "junior", "staff", "frontend", "backend",
-                   "fullstack", "devops", "mobile", "data", "product", "software")):
+            if any(w in line.lower() for w in (
+                "engineer", "developer", "manager", "designer", "analyst",
+                "lead", "senior", "junior", "staff", "frontend", "backend",
+                "fullstack", "devops", "mobile", "data", "product", "software"
+            )):
                 seen.add(line.lower())
                 jobs.append({"title": line, "company": "", "location": location})
-
         return jobs[:20]
 
     def _load_jobs(self) -> list:
@@ -135,19 +149,20 @@ class JobHuntTool(Tool):
         except json.JSONDecodeError:
             return []
 
-    def _save_jobs(self, jobs: list) -> list:
+    def _save_jobs(self, jobs: list):
         existing = self._load_jobs()
+        existing_titles = {j.get("title", "").lower() for j in existing}
         next_id = len(existing)
         for job in jobs:
+            if job.get("title", "").lower() in existing_titles:
+                continue
             existing.append({
-                "id": next_id,
-                "title": job.get("title", ""),
-                "company": job.get("company", ""),
-                "location": job.get("location", ""),
+                "id": next_id, "title": job.get("title", ""),
+                "company": job.get("company", ""), "location": job.get("location", ""),
+                "scraped_at": job.get("scraped_at", ""),
             })
             next_id += 1
         JOB_DB.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
-        return jobs
 
     def _detail(self, arg: str) -> str:
         try:
@@ -158,18 +173,13 @@ class JobHuntTool(Tool):
         if idx < 0 or idx >= len(jobs):
             return f"Index {idx} out of range (0-{len(jobs)-1})"
         j = jobs[idx]
-        return (
-            f"[{j['id']}] {j['title']}\n"
-            f"  Company: {j.get('company', '?')}\n"
-            f"  Location: {j.get('location', '?')}"
-        )
+        return f"[{j['id']}] {j['title']}\n  Company: {j.get('company','?')}\n  Location: {j.get('location','?')}"
 
     def _saved(self) -> str:
         jobs = self._load_jobs()
         if not jobs:
             return "Belum ada lowongan tersimpan."
-        lines = [f"{len(jobs)} lowongan tersimpan:\n"]
+        lines = [f"{len(jobs)} tersimpan:\n"]
         for j in jobs[-20:]:
-            comp = j.get("company", "?")
-            lines.append(f"  [{j['id']}] {j['title']}" + (f" — {comp}" if comp else ""))
+            lines.append(f"  [{j['id']}] {j['title']}" + (f" — {j.get('company','')}" if j.get('company') else ""))
         return "\n".join(lines)
