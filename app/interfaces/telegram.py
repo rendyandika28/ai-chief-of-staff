@@ -78,12 +78,12 @@ class TelegramBot:
         self.scheduler.start()
 
         # Register command suggestions (Telegram auto-complete)
-        async def _set_commands():
-            await self._app.bot.set_my_commands([
+        async def _set_commands(app):
+            await app.bot.set_my_commands([
                 BotCommand("help", "Lihat fitur & panduan"),
                 BotCommand("start", "Mulai ulang bot"),
             ])
-        asyncio.run(_set_commands())
+        self._app.post_init = _set_commands
 
         if self._bus:
             self._bus.on("watcher.alert", lambda payload, bus: self._send_to_user(f"\U0001f514 {payload['message']}"))
