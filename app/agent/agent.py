@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 from typing import Optional
 import logging
 import re
@@ -26,7 +27,8 @@ class Planner:
     def plan(self, message: str, history: list, feedback: str = "",
              memories: Optional[list] = None) -> Optional[dict]:
         instructions = prompt_instructions(self.tools.describe())
-        prompt = self._prompt + "\n\n" + instructions
+        now = datetime.now()
+        prompt = self._prompt + f"\n\nHari ini: {now.strftime('%A, %d %B %Y, %H:%M')} WIB\n\n{instructions}"
 
         if memories:
             mem_text = "\n".join(
