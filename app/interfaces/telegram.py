@@ -1,6 +1,7 @@
 import asyncio
 
 from telegram import Update, BotCommand
+from telegram.constants import ChatAction
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
 from app.config.settings import settings
@@ -24,7 +25,10 @@ class TelegramBot:
             self._user_id = user_id
 
         self.memory.add(user_id, "user", message)
+
+        await update.message.reply_chat_action(ChatAction.TYPING)
         response = self.agent.chat(user_id, message)
+
         self.memory.add(user_id, "assistant", response)
 
         await update.message.reply_text(response)
