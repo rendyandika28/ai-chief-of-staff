@@ -1,7 +1,7 @@
 import asyncio
 
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
 from app.config.settings import settings
 
@@ -40,9 +40,30 @@ class TelegramBot:
         except Exception:
             pass
 
+    async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        text = (
+            "AI Chief of Staff — asisten pribadi Rendy.\n\n"
+            "Bisa ngobrol santai, bantu cari info, eksekusi tools.\n\n"
+            "Fitur:\n"
+            "- Chat natural (ngobrol biasa)\n"
+            "- Weather (cuaca kota)\n"
+            "- Browser (browsing web)\n"
+            "- Job hunt (cari lowongan multi-platform)\n"
+            "- CCTV Jogja (pantau lalu lintas)\n"
+            "- Reminder (pengingat otomatis)\n"
+            "- File management\n"
+            "- HTTP requests\n"
+            "- Calculator\n"
+            "- Auto-apply job\n\n"
+            "Commands: /help /start"
+        )
+        await update.message.reply_text(text)
+
     def run(self):
         self._app = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
+        self._app.add_handler(CommandHandler("help", self._handle_help))
+        self._app.add_handler(CommandHandler("start", self._handle_help))
 
         self.scheduler._on_notify = lambda uid, msg: self._send_to_user(f"\u23f0 Pengingat: {msg}")
         self.scheduler.start()
