@@ -73,7 +73,8 @@ class PlaywrightSession:
         if self._browser is None:
             return ""
 
-        video_dir = os.path.dirname(output_path)
+        video_dir = os.path.abspath(os.path.dirname(output_path))
+        abs_output = os.path.abspath(output_path)
         os.makedirs(video_dir, exist_ok=True)
 
         ctx = self._browser.new_context(
@@ -88,8 +89,8 @@ class PlaywrightSession:
 
         videos = sorted(glob.glob(os.path.join(video_dir, "*.webm")))
         if videos:
-            os.rename(videos[-1], output_path)
-            return output_path
+            os.rename(videos[-1], abs_output)
+            return abs_output
         return ""
 
 
