@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import logging
-logging.basicConfig(level=logging.WARNING, format='%(levelname)s %(name)s: %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
 from app.llm.deepseek import DeepSeekLLM
 from app.agent.memory import Memory

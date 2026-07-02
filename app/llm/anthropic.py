@@ -24,7 +24,9 @@ class ClaudeLLM:
             kwargs["messages"] = chat_messages
 
             response = self.client.messages.create(**kwargs)
-            return response.content[0].text
+            text = response.content[0].text
+            logging.info(f"Claude ok: {len(text)} chars, tokens in={response.usage.input_tokens} out={response.usage.output_tokens}")
+            return text
         except Exception as e:
             logging.error(f"Claude API error: {e}")
             raise
