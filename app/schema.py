@@ -67,26 +67,4 @@ def prompt_instructions(tools_metadata: list[dict]) -> str:
     tool_lines = "\n".join(
         f"- {t['name']}: {t['description']}" for t in tools_metadata
     )
-    return f"""
-## Format output (WAJIB — JSON saja)
-
-Kamu HARUS merespons HANYA dengan raw JSON. Tanpa markdown, tanpa backtick, tanpa teks sebelum/sesudah.
-
-### Chat:
-{{"action": "chat", "message": "jawaban kamu"}}
-
-### Satu tool:
-{{"action": "tool", "tool": "<nama>", "input": "<nilai>"}}
-
-### Rantai tool (berurutan):
-{{"action": "chain", "steps": [{{"tool": "<t1>", "input": "<i1>"}}, {{"tool": "<t2>", "input": "<i2>"}}]}}
-Gunakan "{{prev}}" di input untuk merujuk hasil step sebelumnya.
-
-### Tools tersedia:
-{tool_lines}
-
-### Aturan:
-- action HARUS: chat, tool, atau chain
-- JANGAN tambahkan teks di luar JSON
-- JANGAN bungkus dalam blok ```json```
-"""
+    return f"## Tools tersedia:\n{tool_lines}"

@@ -26,11 +26,10 @@ class Planner:
 
     def plan(self, message: str, history: list, feedback: str = "",
              memories: Optional[list] = None) -> Optional[dict]:
-        instructions = prompt_instructions(self.tools.describe())
         now = datetime.now(timezone(timedelta(hours=7)))
-        date_info = f"\n\nHARI INI: {now.strftime('%A, %d %B %Y jam %H:%M WIB')}. Gunakan info ini untuk input tool yang butuh tanggal (reminder at:, dll)."
-        prompt = self._prompt + date_info + "\n\n" + instructions
-
+        date_info = f"HARI INI: {now.strftime('%A, %d %B %Y jam %H:%M WIB')}"
+        prompt = self._prompt + "\n\n" + date_info
+        prompt += "\n\n" + prompt_instructions(self.tools.describe())
         if memories:
             mem_text = "\n".join(
                 f"- User: {m['user']}\n  Assistant: {m['assistant']}"
