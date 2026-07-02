@@ -196,7 +196,8 @@ class CctvTool(Tool):
 
         name = cam["cctv_title"]
         stream_url = cam["cctv_link"]
-        area = f"{cam['kecamatan_nama']} > {cam['kelurahan_nama']}"
+        area_parts = [p for p in [cam.get("kecamatan_nama", ""), cam.get("kelurahan_nama", "")] if p]
+        area = " > ".join(area_parts) if area_parts else "Yogyakarta"
 
         lines = [f"Camera: {name}", f"Area: {area}"]
 
@@ -223,4 +224,4 @@ class CctvTool(Tool):
             f"else{{v.src='{stream_url}';v.play();}}"
             "</script></body></html>"
         )
-        return self._browser._session.record_video(html, 13, out)
+        return self._browser._session.record_video(html, 16, out)

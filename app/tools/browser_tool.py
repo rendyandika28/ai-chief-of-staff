@@ -85,6 +85,14 @@ class PlaywrightSession:
         )
         page = ctx.new_page()
 
+        # Intercept HLS requests to add Referer header (CCTV server requires it)
+        def _add_referer(route):
+            headers = {**route.request.headers, "Referer": "https://cctv.jogjakota.go.id/"}
+            route.continue_(headers=headers)
+        page.route("**/*cctvjss*", _add_referer)
+        page.route("**/*.m3u8*", _add_referer)
+        page.route("**/*.ts*", _add_referer)
+
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
             f.write(html_content)
             tmp = f.name
