@@ -214,11 +214,13 @@ class CctvTool(Tool):
 
     def _capture_video_browser(self, stream_url: str, name: str) -> str:
         if self._browser is None:
+            print("[CCTV] browser tool is None", flush=True)
             return ""
 
         try:
             session = self._browser._session if hasattr(self._browser, '_session') else None
             if session is None:
+                print("[CCTV] no browser session", flush=True)
                 return ""
             session._ensure_page()
             browser = session._browser
@@ -268,9 +270,10 @@ class CctvTool(Tool):
             if videos:
                 out = f"memory/cctv_{slug}.mp4"
                 os.rename(videos[-1], out)
+                print(f"[CCTV] video captured: {out}", flush=True)
                 return out
         except Exception as e:
-            logging.error(f"CCTV video capture error: {e}")
+            print(f"[CCTV] video capture error: {e}", flush=True)
         return ""
 
     def _capture_screenshot(self, stream_url: str, name: str) -> str:
