@@ -36,12 +36,13 @@ class TelegramBot:
             response = "Maaf, ada error. Coba lagi nanti."
             print(f"Agent error: {e}")
 
-        # Don't store fallback or tool output markers in memory — confuse LLM
+        # Don't store tool outputs or fallback — LLM parrots them
         if response and "kesulitan memproses" not in response:
             clean = re.sub(r'\[(?:IMAGE|VIDEO):.*?\]', '', response)
             clean = re.sub(r'^\[[a-z_]+\]\s*', '', clean)
             clean = re.sub(r'\n{3,}', '\n\n', clean).strip()
-            self.memory.add(user_id, "assistant", clean)
+            if clean and not clean.startswith(("Camera:", "Area:", "Lalu lintas:")):
+                self.memory.add(user_id, "assistant", clean)
 
         await self._send_response(update, response)
 
