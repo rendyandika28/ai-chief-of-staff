@@ -18,6 +18,7 @@ class TelegramBot:
         self._watchers = watchers
         self._app = None
         self._user_id = None
+        self._loop = None
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.message.from_user.id)
@@ -77,12 +78,12 @@ class TelegramBot:
                 pass
 
     def _send_to_user(self, text: str):
-        if self._app is None or self._user_id is None:
+        if self._app is None or self._user_id is None or self._loop is None:
             return
         try:
             asyncio.run_coroutine_threadsafe(
                 self._app.bot.send_message(chat_id=int(self._user_id), text=text),
-                asyncio.get_event_loop(),
+                self._loop,
             )
         except Exception:
             pass
@@ -108,6 +109,7 @@ class TelegramBot:
 
     def run(self):
         async def _post_init(app):
+            self._loop = asyncio.get_running_loop()
             await app.bot.set_my_commands([
                 ("help", "Lihat fitur & panduan"),
                 ("start", "Mulai ulang bot"),
