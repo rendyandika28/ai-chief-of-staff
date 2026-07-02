@@ -226,7 +226,7 @@ class CctvTool(Tool):
                 return ""
 
             slug = name.lower().replace(" ", "_")[:20]
-            video_dir = f"memory/video_{slug}"
+            video_dir = os.path.abspath(f"memory/video_{slug}")
             os.makedirs(video_dir, exist_ok=True)
 
             context = browser.new_context(
