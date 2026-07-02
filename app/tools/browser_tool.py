@@ -16,7 +16,11 @@ class PlaywrightSession:
             from playwright.sync_api import sync_playwright
             self._playwright = sync_playwright().start()
         if self._browser is None:
-            self._browser = self._playwright.chromium.launch(headless=True)
+            self._browser = self._playwright.chromium.launch(headless=True, args=[
+                "--autoplay-policy=no-user-gesture-required",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+            ])
         if self._page is None or self._page.is_closed():
             self._page = self._browser.new_page()
         return self._page

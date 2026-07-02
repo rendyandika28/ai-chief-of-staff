@@ -140,22 +140,23 @@ class CctvTool(Tool):
             return self._camera_info(cameras, cam["cctv_id"])
 
         try:
+            # Build page with hls.js for reliable HLS playback
             html = (
-                "<html><body style='margin:0;background:#000'>"
-                "<video id='v' autoplay muted playsinline style='width:100vw;height:100vh' controls>"
-                f"<source src='{stream_url}' type='application/x-mpegURL'>"
-                "</video>"
+                "<html><head>"
+                "<script src='https://cdn.jsdelivr.net/npm/hls.js@1'></script>"
+                "</head><body style='margin:0;background:#000'>"
+                "<video id='v' autoplay muted playsinline style='width:100vw;height:100vh'></video>"
                 "<script>"
                 "const v=document.getElementById('v');"
-                "v.play().catch(()=>{});"
+                f"if(Hls.isSupported()){{const h=new Hls();h.loadSource('{stream_url}');h.attachMedia(v);h.on(Hls.Events.MANIFEST_PARSED,()=>v.play());}}"
+                f"else if(v.canPlayType('application/vnd.apple.mpegurl')){{v.src='{stream_url}';v.play();}}"
                 "</script></body></html>"
             )
             data_url = "data:text/html;charset=utf-8," + urllib.request.quote(html)
 
             self._browser.run(f"navigate:{data_url}")
-
             import time
-            time.sleep(3)
+            time.sleep(5)  # give stream time to load + render frames
             result = self._browser.run("screenshot")
 
             # Extract path from browser screenshot output: "Screenshot saved: memory/xxx.png"
