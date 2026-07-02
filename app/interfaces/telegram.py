@@ -1,6 +1,6 @@
 import asyncio
 
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
 from app.config.settings import settings
@@ -67,6 +67,14 @@ class TelegramBot:
 
         self.scheduler._on_notify = lambda uid, msg: self._send_to_user(f"\u23f0 Pengingat: {msg}")
         self.scheduler.start()
+
+        # Register command suggestions (Telegram auto-complete)
+        async def _set_commands():
+            await self._app.bot.set_my_commands([
+                BotCommand("help", "Lihat fitur & panduan"),
+                BotCommand("start", "Mulai ulang bot"),
+            ])
+        asyncio.run(_set_commands())
 
         if self._bus:
             self._bus.on("watcher.alert", lambda payload, bus: self._send_to_user(f"\U0001f514 {payload['message']}"))
