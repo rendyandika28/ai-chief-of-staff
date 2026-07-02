@@ -1,7 +1,9 @@
 import json
+import math
 import os
 import subprocess
 import urllib.request
+import urllib.parse
 
 from app.tools.base import Tool
 
@@ -9,6 +11,16 @@ CCTV_API = "https://cctv.jogjakota.go.id/home/getdata"
 CCTV_MAP = "https://cctv.jogjakota.go.id"
 
 CAMERA_CACHE = None
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Distance in meters between two GPS coordinates."""
+    r = 6371000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _fetch_cameras():
@@ -66,7 +78,6 @@ class CctvTool(Tool):
         q = query.lower()
         active = [c for c in cameras if c["cctv_status"] != "2"]
 
-        # ponytail: simple keyword match across all location fields
         def score(c):
             text = (
                 f"{c['cctv_title']} {c['kecamatan_nama']} "
@@ -78,10 +89,54 @@ class CctvTool(Tool):
         scored.sort(key=lambda x: x[0], reverse=True)
         return [c for s, c in scored if s > 0]
 
+    def _nearby(self, cameras, query: str, limit: int = 5):
+        """Fallback: geocode the location, find nearest cameras by GPS distance."""
+        lat, lng = self._geocode(query)
+        if lat is None:
+            return []
+
+        active = [c for c in cameras if c["cctv_status"] != "2"]
+        def dist(c):
+            clat = float(c["cctv_latitude"])
+            clng = float(c["cctv_longitude"])
+            return haversine(lat, lng, clat, clng)
+
+        active.sort(key=dist)
+        return active[:limit]
+
+    def _geocode(self, location: str):
+        """Geocode a location name to lat/lng using Nominatim."""
+        try:
+            url = (
+                "https://nominatim.openstreetmap.org/search?"
+                + urllib.parse.urlencode({"q": f"{location}, Yogyakarta", "format": "json", "limit": 1})
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": "AI-Chief-of-Staff/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            if data:
+                return float(data[0]["lat"]), float(data[0]["lon"])
+        except Exception:
+            pass
+        return None, None
+
     def _list_cameras(self, cameras, query):
         matched = self._match(cameras, query) if query else cameras[:10]
 
-        if not matched:
+        if not matched and query:
+            nearby = self._nearby(cameras, query)
+            if nearby:
+                lines = [f"Tidak ada CCTV dengan nama '{query}'. Kamera terdekat:"]
+                for c in nearby:
+                    loc = f"{c['kecamatan_nama']} > {c['kelurahan_nama']}"
+                    dist = haversine(
+                        *self._geocode(query),
+                        float(c["cctv_latitude"]), float(c["cctv_longitude"]),
+                    )
+                    lines.append(
+                        f"  [{c['cctv_id']}] {c['cctv_title']} — {loc} ({int(dist)}m) (aktif)"
+                    )
+                return "\n".join(lines)
             return f"Tidak ada CCTV ditemukan untuk: {query}"
 
         lines = []
@@ -125,6 +180,11 @@ class CctvTool(Tool):
             matched = self._match(cameras, arg)
             if matched:
                 cam = matched[0]
+        if cam is None:
+            nearby = self._nearby(cameras, arg, limit=1)
+            if nearby:
+                cam = nearby[0]
+
         if cam is None:
             return f"Camera tidak ditemukan: {arg}"
 
