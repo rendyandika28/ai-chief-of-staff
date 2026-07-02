@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+import logging
 import re
 from app.agent.profile import Profile
 from app.prompt.builder import PromptBuilder
@@ -46,6 +47,7 @@ class Planner:
         raw = self.llm.chat(messages)
         data = extract_json(raw)
         if data is None or validate(data, self._tool_exists) is not None:
+            logging.warning(f"Planner invalid response: {raw[:200]}")
             return None
         return data
 
@@ -75,6 +77,7 @@ class Executor:
         raw = self.llm.chat(messages)
         data = extract_json(raw)
         if data is None or data.get("action") != "chat":
+            logging.warning(f"Executor invalid response: {raw[:200]}")
             return None
         return data.get("message")
 
@@ -142,6 +145,13 @@ class Agent:
         return ""
 
     def chat(self, user_id: str, message: str) -> str:
+        try:
+            return self._do_chat(user_id, message)
+        except Exception as e:
+            logging.error(f"Agent crash: {e}", exc_info=True)
+            return "Maaf, ada error internal."
+
+    def _do_chat(self, user_id: str, message: str) -> str:
         history = self.memory.get(user_id)
         feedback = ""
         last_response = "Maaf, aku kesulitan memproses permintaan itu."

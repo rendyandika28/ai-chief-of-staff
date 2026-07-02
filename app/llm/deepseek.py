@@ -1,4 +1,5 @@
 from openai import OpenAI
+import logging
 
 from app.config.settings import settings
 
@@ -11,9 +12,13 @@ class DeepSeekLLM:
         )
 
     def chat(self, messages: list) -> str:
-        response = self.client.chat.completions.create(
-            model=settings.DEEPSEEK_MODEL,
-            messages=messages,
-        )
-
-        return response.choices[0].message.content
+        try:
+            response = self.client.chat.completions.create(
+                model=settings.DEEPSEEK_MODEL,
+                messages=messages,
+                timeout=60,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logging.error(f"DeepSeek API error: {e}")
+            raise
