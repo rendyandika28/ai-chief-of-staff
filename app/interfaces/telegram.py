@@ -38,7 +38,9 @@ class TelegramBot:
             response = "Maaf, ada error. Coba lagi nanti."
             print(f"Agent error: {e}")
 
-        # Never store visual tool outputs or fallback in memory — LLM contamination
+        await self._send_response(update, response)
+
+        # Store in memory — but skip visual tool outputs and fallback
         if "kesulitan memproses" in response:
             return
         if "[VIDEO:" in response or "[IMAGE:" in response:
@@ -46,8 +48,6 @@ class TelegramBot:
         if response.startswith(("[cctv]", "[traffic]", "[browser]")):
             return
         self.memory.add(user_id, "assistant", response.strip())
-
-        await self._send_response(update, response)
 
     async def _send_response(self, update: Update, raw: str):
         text = raw
