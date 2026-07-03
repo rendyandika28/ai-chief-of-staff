@@ -64,7 +64,7 @@ class TelegramBot:
                     await update.message.reply_chat_action(ChatAction.TYPING)
                     last_action = time.time()
                 # Update message periodically
-                if full_text and time.time() - last_update > 0.3:
+                if full_text and time.time() - last_update > 1.2:
                     try:
                         await sent_msg.edit_text(full_text + " ✍️")
                         last_update = time.time()

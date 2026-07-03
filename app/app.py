@@ -24,13 +24,14 @@ FOLLOWUP_PREDICATES = ("working_on", "building", "project", "progress",
 
 def create_core():
     llm = ClaudeLLM()
+    fast_llm = ClaudeLLM(model="claude-haiku-4-5-20251001")
 
     memory = Memory()
     long_term = LongTermMemory()
     scheduler = Scheduler()
     knowledge_graph = KnowledgeGraph()
 
-    agent = Agent(llm, memory, scheduler, long_term, knowledge_graph)
+    agent = Agent(llm, memory, scheduler, long_term, knowledge_graph, fast_llm=fast_llm)
 
     watchers = WatcherManager()
 

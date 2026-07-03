@@ -18,8 +18,9 @@ class Agent:
     """Memory → context → one Claude call (native tools, in-persona) → stream."""
 
     def __init__(self, llm, memory, scheduler=None,
-                 long_term_memory=None, knowledge_graph=None):
+                 long_term_memory=None, knowledge_graph=None, fast_llm=None):
         self.llm = llm
+        self.fast_llm = fast_llm or llm  # cheap model for proactive one-liners
         self.memory = memory
         self.long_term = long_term_memory
         self.knowledge_graph = knowledge_graph
@@ -60,7 +61,7 @@ class Agent:
                 {"role": "system", "content": self._static_prompt},
                 {"role": "user", "content": f"[SISTEM: bukan Rendy yang ngomong] {instruction}"},
             ]
-            return self.llm.chat(msg, max_tokens=200).strip() or None
+            return self.fast_llm.chat(msg, max_tokens=200).strip() or None
         except Exception:
             return None
 
