@@ -48,10 +48,6 @@ class Scheduler:
         )
 
     @staticmethod
-    def calc_at(iso: str) -> str:
-        return iso
-
-    @staticmethod
     def calc_daily(time_str: str) -> tuple:
         """Returns (run_at_iso, interval_seconds) for daily at HH:MM."""
         h, m = map(int, time_str.split(":"))
@@ -76,6 +72,21 @@ class Scheduler:
             days_ahead += 7
         run_at += timedelta(days=days_ahead)
         return run_at.isoformat(), 604800
+
+    def due_today(self, user_id: str) -> list[str]:
+        """Pending reminder messages scheduled for today (for the morning brief)."""
+        today = datetime.now(WIB).date().isoformat()
+        rows = self._db.fetch(
+            "SELECT message, run_at FROM tasks WHERE status='pending' AND user_id=?",
+            (user_id,),
+        )
+        return [m for m, at in rows if at[:10] == today]
+
+    def has_pending(self, message: str) -> bool:
+        return bool(self._db.fetch(
+            "SELECT 1 FROM tasks WHERE status='pending' AND message=? LIMIT 1",
+            (message,),
+        ))
 
     def _get_due(self):
         now = datetime.now(WIB).isoformat()

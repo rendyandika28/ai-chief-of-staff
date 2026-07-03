@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 class WatcherManager:
-    def __init__(self, event_bus=None):
-        self._bus = event_bus
+    def __init__(self, on_alert=None):
+        self.on_alert = on_alert  # set later by the interface (e.g. TelegramBot)
         self._running = True  # start immediately
 
     def register(self, watcher, interval_seconds: int):
@@ -23,8 +23,8 @@ class WatcherManager:
         while self._running:
             try:
                 result = watcher()
-                if result and self._bus:
-                    self._bus.emit("watcher.alert", {"message": result})
+                if result and self.on_alert:
+                    self.on_alert(result)
             except Exception as e:
                 logger.error(f"Watcher error: {e}")
             time.sleep(interval_seconds)

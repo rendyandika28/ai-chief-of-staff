@@ -4,16 +4,14 @@ load_dotenv()
 import logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s %(name)s: %(message)s')
 
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from app.agent.memory import Memory
 from app.agent.agent import Agent
 from app.agent.scheduler import Scheduler
 from app.memory.long_term import LongTermMemory
-from app.os.event_bus import EventBus
 from app.os.knowledge_graph import KnowledgeGraph
-from app.agents.watcher import WatcherManager
+from app.agent.watcher import WatcherManager
 from app.llm.anthropic import ClaudeLLM
 
 WIB = timezone(timedelta(hours=7))
@@ -25,34 +23,40 @@ FOLLOWUP_PREDICATES = ("working_on", "building", "project", "progress",
 
 
 def create_core():
-    event_bus = EventBus()
-    llm = ClaudeLLM(model="claude-sonnet-5")
+    llm = ClaudeLLM()
 
     memory = Memory()
     long_term = LongTermMemory()
     scheduler = Scheduler()
     knowledge_graph = KnowledgeGraph()
 
-    agent = Agent(llm, llm, memory, scheduler, long_term, knowledge_graph)
+    agent = Agent(llm, memory, scheduler, long_term, knowledge_graph)
 
-    watchers = WatcherManager(event_bus)
+    watchers = WatcherManager()
+
+    # Forget stale facts daily so the knowledge graph doesn't grow forever.
+    watchers.register(lambda: knowledge_graph.cleanup(), 86400)
 
     # Signal-based proactivity: if a project/deadline the user mentioned has gone
-    # quiet, nudge ONCE with an LLM-phrased line (persona), not a template alarm.
+    # quiet, nudge with an LLM-phrased line (persona). Max 2/day, min 4h apart.
     def stale_topic_followup():
         now = datetime.now(WIB)
         if not (9 <= now.hour <= 21):  # waking hours only
             return None
-        today = now.strftime("%Y-%m-%d")
-        if _already_nudged_today(knowledge_graph, today):
+        if not _nudge_allowed(knowledge_graph, now):
             return None
 
         stale = _find_stale_topic(knowledge_graph, now)
         if not stale:
             return None
 
-        knowledge_graph.upsert("system", "Rendy", "nudged_on", today, 1.0)
-        return _phrase_followup(llm, stale)
+        knowledge_graph.upsert("system", "Rendy", "nudged_on", now.isoformat(), 1.0)
+        topic = f"{stale['predicate'].replace('_', ' ')} {stale['object']}"
+        return agent.phrase(
+            f"Rendy beberapa hari lalu sempet cerita soal '{topic}' tapi udah lama gak dibahas. "
+            "Buka obrolan santai buat nanya progressnya, SATU kalimat pendek, "
+            "kayak temen yang inget. Jangan template, jangan kaku."
+        )
 
     watchers.register(stale_topic_followup, 3600)  # check hourly, gated to once/day
 
@@ -69,14 +73,47 @@ def create_core():
 
     watchers.register(job_scraper, 21600)  # every 6 hours
 
-    return agent, memory, scheduler, event_bus, watchers
+    # Morning brief — persistent daily task at 07:00 WIB, survives restarts.
+    if not scheduler.has_pending("__morning_brief__"):
+        run_at, interval = Scheduler.calc_daily("07:00")
+        scheduler.add("system", "__morning_brief__", run_at=run_at, interval_seconds=interval)
+
+    def morning_brief():
+        parts = []
+        weather = agent.tools.get("weather")
+        if weather:
+            try:
+                parts.append(f"Cuaca: {weather.run('jakarta')}")
+            except Exception:
+                pass
+        reminders = scheduler.due_today(USER_ID)
+        if reminders:
+            parts.append("Reminder hari ini: " + "; ".join(reminders))
+        stale = _find_stale_topic(knowledge_graph, datetime.now(WIB))
+        if stale:
+            parts.append(f"Topik yang lama gak dibahas: {stale['predicate'].replace('_', ' ')} {stale['object']}")
+        return agent.phrase(
+            "Bikin morning brief singkat (2-4 kalimat) buat Rendy dari data ini, "
+            "gaya lo sendiri, sapa sekilas terus langsung isi:\n" + "\n".join(parts)
+        )
+
+    scheduler.morning_brief = morning_brief
+
+    return agent, memory, scheduler, watchers
 
 
-def _already_nudged_today(kg, today: str) -> bool:
-    for f in kg.about("system", "Rendy"):
-        if f["predicate"] == "nudged_on" and f["object"] == today:
-            return True
-    return False
+def _nudge_allowed(kg, now) -> bool:
+    """Max 2 stale-topic nudges per day, at least 4h apart."""
+    today = now.strftime("%Y-%m-%d")
+    stamps = sorted(
+        f["object"] for f in kg.about("system", "Rendy")
+        if f["predicate"] == "nudged_on" and f["object"].startswith(today)
+    )
+    if len(stamps) >= 2:
+        return False
+    if stamps and stamps[-1] > (now - timedelta(hours=4)).isoformat():
+        return False
+    return True
 
 
 def _find_stale_topic(kg, now):
@@ -93,20 +130,3 @@ def _find_stale_topic(kg, now):
         if rows and rows[0][0] < cutoff.isoformat():
             return f
     return None
-
-
-def _phrase_followup(llm, fact):
-    persona = Path("prompts/system.md").read_text(encoding="utf-8")
-    topic = f"{fact['predicate'].replace('_', ' ')} {fact['object']}"
-    msg = [
-        {"role": "system", "content": persona},
-        {"role": "user", "content": (
-            f"[SISTEM: bukan Rendy yang ngomong] Rendy beberapa hari lalu sempet cerita soal '{topic}' "
-            "tapi udah lama gak dibahas. Buka obrolan santai buat nanya progressnya, SATU kalimat pendek, "
-            "kayak temen yang inget. Jangan template, jangan kaku."
-        )},
-    ]
-    try:
-        return llm.chat(msg, max_tokens=120).strip() or None
-    except Exception:
-        return None

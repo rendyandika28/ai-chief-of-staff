@@ -5,7 +5,6 @@ import subprocess
 import urllib.request
 import urllib.parse
 
-from app.tools.base import Tool
 
 CCTV_API = "https://cctv.jogjakota.go.id/home/getdata"
 CCTV_MAP = "https://cctv.jogjakota.go.id"
@@ -42,7 +41,7 @@ def _fetch_cameras():
     return CAMERA_CACHE
 
 
-class CctvTool(Tool):
+class CctvTool:
     name = "cctv"
     description = (
         "CCTV Jogja network (cctv.jogjakota.go.id). 154 cameras across Yogyakarta. "

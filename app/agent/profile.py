@@ -49,35 +49,3 @@ class Profile:
 
     def contact(self) -> dict:
         return self._read().get("contact", {})
-
-    def experience_text(self) -> str:
-        """Formatted experience for job applications."""
-        data = self._read()
-        lines = []
-        for exp in data.get("experience", []):
-            lines.append(f"{exp['title']} at {exp['company']} ({exp['period']})")
-            for h in exp.get("highlights", []):
-                lines.append(f"  - {h}")
-            lines.append("")
-        return "\n".join(lines)
-
-    def summary_text(self) -> str:
-        data = self._read()
-        parts = [data.get("summary", "")]
-
-        education = data.get("education", {})
-        if education:
-            parts.append(
-                f"Education: {education.get('degree')} from {education.get('school')}"
-                f" — GPA {education.get('gpa', '')}"
-            )
-
-        certs = data.get("certificates", [])
-        if certs:
-            parts.append(f"Certificates: {', '.join(certs)}")
-
-        languages = data.get("languages_spoken", [])
-        if languages:
-            parts.append(f"Languages: {', '.join(languages)}")
-
-        return "\n".join(parts)

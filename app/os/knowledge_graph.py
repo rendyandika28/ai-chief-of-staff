@@ -1,6 +1,7 @@
 """Knowledge graph — subject-predicate-object triple store with confidence scoring
 and automatic cleanup of stale facts."""
 
+import re
 from datetime import datetime, timedelta, timezone
 
 from app.lib.database import Database
@@ -59,10 +60,20 @@ class KnowledgeGraph:
         return [{"subject": subject, "predicate": r[0], "object": r[1], "confidence": r[2]} for r in rows]
 
     def search(self, user_id: str, query: str) -> list:
-        q = f"%{query}%"
+        tokens = [t for t in re.findall(r"\w+", query.lower()) if len(t) > 2][:8]
+        if not tokens:
+            return []
+        clause = " OR ".join(
+            "(subject LIKE ? OR predicate LIKE ? OR object LIKE ?)" for _ in tokens
+        )
+        params = [user_id]
+        for t in tokens:
+            params += [f"%{t}%"] * 3
         rows = self._db.fetch(
-            "SELECT subject, predicate, object, confidence FROM facts WHERE user_id = ? AND (subject LIKE ? OR predicate LIKE ? OR object LIKE ?) ORDER BY confidence DESC LIMIT 20",
-            (user_id, q, q, q),
+            f"SELECT subject, predicate, object, confidence FROM facts "
+            f"WHERE user_id = ? AND confidence >= 0.3 AND ({clause}) "
+            f"ORDER BY confidence DESC LIMIT 20",
+            tuple(params),
         )
         return [{"subject": r[0], "predicate": r[1], "object": r[2], "confidence": r[3]} for r in rows]
 

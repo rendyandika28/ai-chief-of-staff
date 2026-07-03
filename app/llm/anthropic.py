@@ -18,17 +18,7 @@ class ClaudeLLM:
             logging.error(f"Claude API error: {e}")
             raise
 
-    def stream(self, messages: list, max_tokens: int = 4096):
-        try:
-            kwargs = self._build_kwargs(messages, max_tokens)
-            with self.client.messages.stream(**kwargs) as stream:
-                for text in stream.text_stream:
-                    yield text
-        except Exception as e:
-            logging.error(f"Claude stream error: {e}")
-            yield ""
-
-    def stream_with_tools(self, messages: list, tools: list, runner, max_tokens: int = 1024):
+    def stream_with_tools(self, messages: list, tools: list, runner, max_tokens: int = 4096):
         """Native tool-use loop: streams the reply in-persona, calling tools as the
         model requests them. `runner(name, input_dict) -> str` executes a tool."""
         system, chat = self._split(messages)

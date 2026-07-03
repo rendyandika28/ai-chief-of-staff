@@ -6,7 +6,6 @@ import urllib.error
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from app.tools.base import Tool
 
 WIB = timezone(timedelta(hours=7))
 
@@ -22,7 +21,7 @@ JOB_DB = Path("data/jobs.json")
 JOB_DB.parent.mkdir(parents=True, exist_ok=True)
 
 
-class JobHuntTool(Tool):
+class JobHuntTool:
     name = "job_hunt"
     description = (
         "Cari lowongan & report. Commands: search:<role>|<loc>, report:<role>|<loc>, "

@@ -3,12 +3,11 @@ import time
 import urllib.request
 import urllib.error
 
-from app.tools.base import Tool
 
 _weather_cache = {}  # city -> (timestamp, result)
 
 
-class WeatherTool(Tool):
+class WeatherTool:
     name = "weather"
     description = "Get current weather for a city. Input: city name. Uses Open-Meteo (free, no API key)."
 

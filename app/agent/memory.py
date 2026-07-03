@@ -2,8 +2,8 @@ from app.lib.database import Database
 
 
 class Memory:
-    def __init__(self):
-        self._db = Database("memory/conversations.db")
+    def __init__(self, db_path: str = "memory/conversations.db"):
+        self._db = Database(db_path)
         self._db.commit_sql("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

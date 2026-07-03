@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 
 WIB = timezone(timedelta(hours=7))
 
-from app.tools.base import Tool
 
 MONTHS = [
     "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -19,7 +18,7 @@ DAYS = {
 }
 
 
-class ReminderTool(Tool):
+class ReminderTool:
     name = "reminder"
     description = (
         "Set reminders. Formats: "

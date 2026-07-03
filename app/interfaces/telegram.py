@@ -15,14 +15,13 @@ from app.config.settings import settings
 
 
 class TelegramBot:
-    def __init__(self, agent, memory, scheduler, event_bus=None, watchers=None):
+    def __init__(self, agent, memory, scheduler, watchers=None):
         self.agent = agent
         self.memory = memory
         self.scheduler = scheduler
-        self._bus = event_bus
         self._watchers = watchers
         self._app = None
-        self._user_id = None
+        self._user_id = "507090539"  # ponytail: hardcoded biar notifikasi jalan walau belum ada chat masuk
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = str(update.message.from_user.id)
@@ -117,6 +116,25 @@ class TelegramBot:
             except Exception:
                 pass
 
+    def send_proactive(self, text: str):
+        """Send an agent-initiated message AND record it, so the conversation
+        has context when the user replies to it."""
+        self._send_to_user(text)
+        self.memory.add(self._user_id, "assistant", text)
+
+    def _on_scheduled(self, user_id: str, message: str):
+        if message == "__morning_brief__":
+            build = getattr(self.scheduler, "morning_brief", None)
+            text = build() if build else None
+            if text:
+                self.send_proactive(text)
+            return
+        text = self.agent.phrase(
+            f"Reminder '{message}' due sekarang. Ingetin Rendy santai, satu kalimat pendek, "
+            "kayak temen yang nepok pundak. Jangan template."
+        ) or f"⏰ Eh bro, {message.lower()}! Jangan lupa ya 😄"
+        self.send_proactive(text)
+
     def _send_to_user(self, text: str):
         if self._app is None or self._user_id is None:
             return
@@ -160,13 +178,11 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("help", self._handle_help))
         self._app.add_handler(CommandHandler("start", self._handle_help))
 
-        self.scheduler._on_notify = lambda uid, msg: (
-            self._send_to_user(f"⏰ Eh bro, {msg.lower()}! Jangan lupa ya 😄")
-        )
+        self.scheduler._on_notify = self._on_scheduled
         self.scheduler.start()
 
-        if self._bus:
-            self._bus.on("watcher.alert", lambda payload, bus: self._send_to_user(f"\U0001f514 {payload['message']}"))
+        if self._watchers:
+            self._watchers.on_alert = self.send_proactive
 
         print("Telegram bot running...")
         self._app.run_polling()

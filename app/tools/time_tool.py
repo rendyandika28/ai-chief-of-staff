@@ -1,7 +1,6 @@
 from datetime import datetime
-from app.tools.base import Tool
 
-class TimeTool(Tool):
+class TimeTool:
     name = "time"
     description = "Get current time"
 
