@@ -11,6 +11,7 @@ Auth: HTTP Basic via DASH_USER / DASH_PASS env vars.
 import os
 import secrets
 import sqlite3
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -58,6 +59,35 @@ def _scalar(dbname: str, sql: str, params=()) -> int:
     return r[0][0] if r and r[0] and r[0][0] is not None else 0
 
 
+def _age(ts: str):
+    """Detik sejak ts (UTC "YYYY-MM-DD HH:MM:SS"). Pakai jam server = jam penulis, no skew."""
+    if not ts:
+        return None
+    try:
+        s = ts.replace("T", " ").split(".")[0]
+        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds()
+    except Exception:
+        return None
+
+
+def _status(events: list) -> str:
+    """awake | restarting | down — dihitung server-side dari heartbeat & marker deploy."""
+    hb_i = next((i for i, e in enumerate(events) if e["kind"] == "heartbeat"), None)
+    dep_i = next((i for i, e in enumerate(events) if e["kind"] == "deploy"), None)
+    # deploy lebih baru dari heartbeat terakhir → lagi restart
+    if dep_i is not None and (hb_i is None or dep_i < hb_i):
+        return "restarting"
+    age = _age(events[hb_i]["ts"]) if hb_i is not None else None
+    if age is None:
+        return "down"
+    if age < 90:
+        return "awake"
+    if age < 360:        # heartbeat baru berhenti < 6 mnt → kemungkinan lagi restart
+        return "restarting"
+    return "down"
+
+
 def build_state() -> dict:
     events = recent(200)
     feed = [e for e in events if e["kind"] != "heartbeat"][:60]
@@ -86,6 +116,7 @@ def build_state() -> dict:
     ]
 
     return {
+        "status": _status(events),
         "last_beat": last_beat,
         "last_active": events[0]["ts"] if events else None,
         "last_error": last_error,
@@ -235,14 +266,17 @@ function ago(ts){
 }
 function esc(t){const e=document.createElement('div');e.textContent=t??'';return e.innerHTML;}
 
+const STATUS = {
+  awake:      {label:'AWAKE',      color:'text-mint',  dot:'bg-mint breathe'},
+  restarting: {label:'RESTARTING', color:'text-amber', dot:'bg-amber breathe'},
+  down:       {label:'TIDAK AKTIF',color:'text-coral', dot:'bg-coral'},
+};
 function render(s){
-  // status: awake kalau heartbeat < 90 dtk
-  let beat = s.last_beat ? new Date(s.last_beat.replace(' ','T')+'Z') : null;
-  let awake = beat && (Date.now()-beat.getTime() < 90000);
+  const S = STATUS[s.status] || STATUS.down;
   const st=document.getElementById('status'), dot=document.getElementById('dot');
-  st.textContent = awake ? 'AWAKE' : 'TIDAK AKTIF';
-  st.className = 'font-display font-600 text-sm '+(awake?'text-mint':'text-coral');
-  dot.className = 'w-2.5 h-2.5 rounded-full '+(awake?'bg-mint breathe':'bg-coral');
+  st.textContent = S.label;
+  st.className = 'font-display font-600 text-sm '+S.color;
+  dot.className = 'w-2.5 h-2.5 rounded-full '+S.dot;
   document.getElementById('lastactive').textContent = 'aktivitas terakhir · '+ago(s.last_active);
 
   // tiles

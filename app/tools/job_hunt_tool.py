@@ -29,19 +29,7 @@ class JobHuntTool:
     )
 
     def __init__(self, profile=None):
-        self._playwright = None
-        self._browser = None
         self._profile = profile
-
-    def _ensure_browser(self):
-        if self._playwright is None:
-            from playwright.sync_api import sync_playwright
-            self._playwright = sync_playwright().start()
-        if self._browser is None:
-            self._browser = self._playwright.chromium.launch(headless=True, args=[
-                "--no-sandbox", "--disable-setuid-sandbox"
-            ])
-        return self._browser
 
     def run(self, input: str = "", user_id: str = "") -> str:
         parts = input.strip().split(":", 1)
@@ -68,7 +56,7 @@ class JobHuntTool:
             return "Error: role required"
         lines = [f"Lowongan '{role}' di '{location}':\n"]
         try:
-            listings = self._scrape_google(role, location)
+            listings = self._fetch_jobs(role, location)
             if listings:
                 self._save_jobs(listings)
                 jobs = self._load_jobs()
@@ -88,9 +76,9 @@ class JobHuntTool:
         if not role:
             return "Error: role required"
         try:
-            fresh = self._scrape_google(role, location)
+            fresh = self._fetch_jobs(role, location)
         except Exception as e:
-            return f"Scraping error: {e}"
+            return f"Gagal ambil lowongan: {e}"
 
         existing = self._load_jobs()
         existing_titles = {j.get("title", "").lower() for j in existing}
@@ -122,8 +110,8 @@ class JobHuntTool:
             contract_note = " (Prefer contract/freelance remote — no BPJS)" if pref_notes else ""
             lines.append(
                 f"{'─'*40}\n"
-                f"📌 {j['title']}\n"
-                f"   Score: {j['score']} | ID: [{j.get('id','?')}]\n"
+                f"📌 {j['title']}" + (f" — {j['company']}" if j.get('company') else "") + "\n"
+                f"   {j.get('location','Remote')} | Score: {j['score']} | ID: [{j.get('id','?')}]\n"
                 f"   URL: {jurl}{contract_note}\n\n"
                 f"📝 Cover Letter:\n"
                 f"Dear Hiring Manager,\n\n"
@@ -140,53 +128,28 @@ class JobHuntTool:
         lines.append("Ketik 'mark_applied:<id>' setelah apply biar gak duplikat.")
         return "\n".join(lines)
 
-    def _scrape_google(self, role: str, location: str) -> list:
-        browser = self._ensure_browser()
-        page = browser.new_page()
-        page.set_viewport_size({"width": 1280, "height": 900})
-        try:
-            url = PLATFORMS["google"].format(
-                role=urllib.request.quote(role),
-                loc=urllib.request.quote(location),
-            )
-            page.goto(url, wait_until="domcontentloaded", timeout=15000)
-            import time; time.sleep(3)
-            content = page.inner_text("body")
-            links_raw = page.evaluate("""() => {
-                const links = document.querySelectorAll('a[href*="/jobs/"], a[href*="linkedin"], a[href*="glints"], a[href*="indeed"]');
-                return Array.from(links).slice(0, 30).map(a => ({
-                    text: a.textContent.trim(),
-                    href: a.href
-                }));
-            }""")
-            url_map = {}
-            for l in links_raw:
-                key = l.get("text", "")[:40].lower()
-                if key:
-                    url_map[key] = l.get("href", "")
-        finally:
-            page.close()
+    def _fetch_jobs(self, role: str, location: str) -> list:
+        # Remotive API — remote-only, gratis, no key, data terstruktur (bukan scraping).
+        url = "https://remotive.com/api/remote-jobs?search=" + urllib.request.quote(role)
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read())
 
-        jobs, seen = [], set()
-        for line in content.split("\n"):
-            line = line.strip()
-            if not line or len(line) < 5 or len(line) > 120:
+        # Search Remotive longgar (bisa nyasar) — filter judul harus mengandung kata kunci role.
+        words = [w for w in role.lower().split() if len(w) > 3]
+        jobs = []
+        for j in data.get("jobs", []):
+            title = (j.get("title") or "").strip()
+            if not title:
                 continue
-            lk = line.lower()
-            if lk in seen:
+            if words and not any(w in title.lower() for w in words):
                 continue
-            if any(w in lk for w in (
-                "engineer", "developer", "manager", "designer", "analyst",
-                "lead", "senior", "junior", "staff", "frontend", "backend",
-                "fullstack", "devops", "mobile", "data", "product", "software"
-            )):
-                seen.add(lk)
-                job_url = ""
-                for key, href in url_map.items():
-                    if line[:30].lower() in key or key in line[:30].lower():
-                        job_url = href
-                        break
-                jobs.append({"title": line, "company": "", "location": location, "url": job_url})
+            jobs.append({
+                "title": title,
+                "company": (j.get("company_name") or "").strip(),
+                "location": j.get("candidate_required_location") or "Remote",
+                "url": j.get("url", ""),
+            })
         return jobs[:20]
 
     def _load_jobs(self) -> list:
