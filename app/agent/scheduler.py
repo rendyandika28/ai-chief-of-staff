@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from app.lib.database import Database
+from app.lib.events import log_event
 
 WIB = timezone(timedelta(hours=7))
 
@@ -103,6 +104,7 @@ class Scheduler:
         self._db.commit_sql("UPDATE tasks SET run_at=? WHERE id=?", (run_at, task_id))
 
     def _loop(self):
+        last_beat = 0.0
         while self._running:
             try:
                 for task in self._get_due():
@@ -113,6 +115,10 @@ class Scheduler:
                         self._reschedule(task_id, interval)
                     else:
                         self._mark_done(task_id)
+                # ponytail: heartbeat 30s → dashboard bisa bedain agent hidup vs mati
+                if time.time() - last_beat > 30:
+                    log_event("heartbeat")
+                    last_beat = time.time()
             except Exception:
                 pass
             time.sleep(1)

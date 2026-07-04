@@ -13,6 +13,7 @@ from telegram.constants import ChatAction
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 
 from app.config.settings import settings
+from app.lib.events import log_event
 
 
 class TelegramBot:
@@ -163,8 +164,10 @@ class TelegramBot:
         has context when the user replies to it."""
         self._send_to_user(text)
         self.memory.add(self._user_id, "assistant", text)
+        log_event("proactive", text[:120])
 
     def _on_scheduled(self, user_id: str, message: str):
+        log_event("reminder", message[:120])
         if message == "__morning_brief__":
             build = getattr(self.scheduler, "morning_brief", None)
             text = build() if build else None

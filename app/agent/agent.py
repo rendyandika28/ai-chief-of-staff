@@ -7,6 +7,7 @@ import re
 
 from app.agent.profile import Profile
 from app.tools.factory import load_tools
+from app.lib.events import log_event
 
 MAX_HISTORY = 20
 WIB = timezone(timedelta(hours=7))
@@ -49,10 +50,15 @@ class Agent:
         tool = self.tools.get(tool_name)
         if tool is None:
             return f"(tool '{tool_name}' gak ada)"
+        log_event("tool", f"{tool_name}: {tool_input[:80]}")
         try:
-            return tool.run(tool_input, user_id=user_id)
-        except TypeError:
-            return tool.run(tool_input)
+            try:
+                return tool.run(tool_input, user_id=user_id)
+            except TypeError:
+                return tool.run(tool_input)
+        except Exception as e:
+            log_event("error", f"{tool_name}: {e}")
+            raise
 
     def phrase(self, instruction: str) -> str | None:
         """One in-persona line for proactive pings (reminders, nudges, briefs)."""
