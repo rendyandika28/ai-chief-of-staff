@@ -5,6 +5,8 @@ from app.tools.weather_tool import WeatherTool
 from app.tools.cctv_tool import CctvTool
 from app.tools.job_hunt_tool import JobHuntTool
 from app.tools.reminder_tool import ReminderTool
+from app.tools.news_tool import NewsTool
+from app.tools.polymarket_tool import PolymarketTool
 
 
 class RememberTool:
@@ -32,6 +34,8 @@ def load_tools(scheduler=None, profile=None, knowledge_graph=None) -> dict:
         "weather": WeatherTool(),
         "cctv": CctvTool(),
         "job_hunt": JobHuntTool(profile),
+        "news": NewsTool(),
+        "polymarket": PolymarketTool(),
     }
     if scheduler:
         tools["reminder"] = ReminderTool(scheduler)
