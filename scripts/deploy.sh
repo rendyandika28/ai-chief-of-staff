@@ -15,9 +15,12 @@ LOCAL=$(git rev-parse @)
 REMOTE=$(git rev-parse '@{u}')
 [ "$LOCAL" = "$REMOTE" ] && exit 0   # gak ada perubahan → keluar diam
 
-echo "[$(date -Is)] update ke $REMOTE — deploying"
-# tandai lagi restart supaya dashboard nampil RESTARTING (best-effort)
-sqlite3 memory/events.db "INSERT INTO events(kind,detail) VALUES('deploy','auto-deploy restart')" 2>/dev/null || true
+NEW=$(git log -1 --format='%h %s' '@{u}' 2>/dev/null || echo "$REMOTE")
+echo "[$(date -Is)] update ke $NEW — deploying"
+# tandai lagi restart + commit apa yang masuk → muncul di activity feed & bikin status RESTARTING.
+# lewat python (argv) biar pesan commit yang ada tanda kutip gak mecahin SQL. best-effort.
+uv run python -c "import sys; from app.lib.events import log_event; log_event('deploy', sys.argv[1])" \
+    "Update baru: $NEW — restarting" 2>/dev/null || true
 
 git pull -q origin main
 uv sync -q

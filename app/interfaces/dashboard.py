@@ -250,6 +250,7 @@ const KIND = {
   tool:     {c:'azure', label:'tool',     dot:'#83A9F5'},
   proactive:{c:'amber', label:'proaktif', dot:'#F4B740'},
   reminder: {c:'amber', label:'reminder', dot:'#F4B740'},
+  deploy:   {c:'mint',  label:'deploy',   dot:'#6EE7C7'},
   error:    {c:'coral', label:'error',    dot:'#F26D6D'},
 };
 
