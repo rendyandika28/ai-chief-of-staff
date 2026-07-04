@@ -3,6 +3,7 @@ import json
 import os
 import queue
 import re
+import tempfile
 import threading
 import time
 import urllib.request
@@ -24,9 +25,50 @@ class TelegramBot:
         self._user_id = "507090539"  # ponytail: hardcoded biar notifikasi jalan walau belum ada chat masuk
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = str(update.message.from_user.id)
-        message = update.message.text
+        await self._process(update, str(update.message.from_user.id), update.message.text)
 
+    def _transcribe(self, path: str) -> str:
+        # ponytail: Groq pakai SDK openai via base_url — model Whisper sama, ~9x lebih murah
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
+        with open(path, "rb") as f:
+            resp = client.audio.transcriptions.create(
+                model="whisper-large-v3-turbo",
+                file=f,
+                language="id",
+            )
+        return resp.text
+
+    async def _handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = str(update.message.from_user.id)
+        voice = update.message.voice or update.message.audio
+        await update.message.reply_chat_action(ChatAction.TYPING)
+
+        tmp = os.path.join(tempfile.gettempdir(), f"vn_{voice.file_unique_id}.ogg")
+        try:
+            tg_file = await voice.get_file()
+            await tg_file.download_to_drive(tmp)
+            loop = asyncio.get_running_loop()
+            text = await loop.run_in_executor(None, self._transcribe, tmp)
+        except Exception:
+            await update.message.reply_text("Maaf, gagal proses suaranya. Coba lagi ya 🙏")
+            return
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+        text = (text or "").strip()
+        if not text:
+            await update.message.reply_text("Hmm, suaranya gak kedengeran. Coba ulang?")
+            return
+
+        # Echo hasil transcribe biar keliatan kalau salah denger
+        await update.message.reply_text(f'🎤 "{text}"')
+        await self._process(update, user_id, text)
+
+    async def _process(self, update: Update, user_id: str, message: str):
         if self._user_id is None:
             self._user_id = user_id
 
@@ -175,6 +217,7 @@ class TelegramBot:
             .build()
         )
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
+        self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice))
         self._app.add_handler(CommandHandler("help", self._handle_help))
         self._app.add_handler(CommandHandler("start", self._handle_help))
 
