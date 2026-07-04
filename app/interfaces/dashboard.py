@@ -260,10 +260,10 @@ function ago(ts){
   let d = new Date(ts.includes('T') ? ts : ts.replace(' ','T')+'Z');
   if(isNaN(d)) return ts;
   let s = Math.max(0,(Date.now()-d.getTime())/1000);
-  if(s<60) return Math.floor(s)+'d lalu';
-  if(s<3600) return Math.floor(s/60)+'m lalu';
-  if(s<86400) return Math.floor(s/3600)+'j lalu';
-  return Math.floor(s/86400)+'h lalu';
+  if(s<60) return 'baru aja';
+  if(s<3600) return Math.floor(s/60)+' mnt lalu';
+  if(s<86400) return Math.floor(s/3600)+' jam lalu';
+  return Math.floor(s/86400)+' hari lalu';
 }
 function esc(t){const e=document.createElement('div');e.textContent=t??'';return e.innerHTML;}
 
