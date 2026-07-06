@@ -106,8 +106,8 @@ class TelegramBot:
                 if time.time() - last_action > 4:
                     await update.message.reply_chat_action(ChatAction.TYPING)
                     last_action = time.time()
-                # Update message periodically
-                if full_text and time.time() - last_update > 1.2:
+                # Live preview — cuma sampai batas aman Telegram; sisanya di-split pas final
+                if full_text and len(full_text) < 3900 and time.time() - last_update > 1.2:
                     try:
                         await sent_msg.edit_text(full_text + " ✍️")
                         last_update = time.time()
@@ -124,7 +124,7 @@ class TelegramBot:
         if error_ref:
             display = "Maaf, ada error. Coba lagi nanti."
         display = re.sub(r'\[(?:VIDEO|IMAGE|FILE):.*?\]', '', display).strip()
-        await sent_msg.edit_text(display or "Maaf, ada error. Coba lagi nanti.")
+        await self._send_long(sent_msg, update, display or "Maaf, ada error. Coba lagi nanti.")
 
         # Handle visual outputs FIRST — before memory filter
         await self._send_media(update, full_text)
@@ -137,6 +137,40 @@ class TelegramBot:
         # File output: simpen teksnya tanpa marker (biar konteks inget udah bikin dok)
         clean = re.sub(r'\[FILE:.*?\]', '', full_text).strip()
         self.memory.add(user_id, "assistant", clean)
+
+    @staticmethod
+    def _chunk(text: str, size: int = 4000):
+        """Pecah teks jadi potongan <= size, mecah di batas baris. Baris raksasa dipotong paksa."""
+        out, cur = [], ""
+        for line in text.split("\n"):
+            while len(line) > size:  # satu baris kelewat panjang
+                if cur:
+                    out.append(cur)
+                    cur = ""
+                out.append(line[:size])
+                line = line[size:]
+            candidate = line if not cur else cur + "\n" + line
+            if len(candidate) > size:
+                out.append(cur)
+                cur = line
+            else:
+                cur = candidate
+        if cur:
+            out.append(cur)
+        return out
+
+    async def _send_long(self, sent_msg, update: Update, text: str):
+        """Kirim teks yang bisa >4096 char: chunk pertama edit pesan '...', sisanya pesan baru."""
+        chunks = self._chunk(text) or ["Maaf, ada error. Coba lagi nanti."]
+        try:
+            await sent_msg.edit_text(chunks[0])
+        except Exception:
+            pass
+        for c in chunks[1:]:
+            try:
+                await update.message.reply_text(c)
+            except Exception:
+                pass
 
     async def _send_media(self, update: Update, raw: str):
         image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
