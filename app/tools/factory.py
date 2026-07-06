@@ -7,6 +7,7 @@ from app.tools.job_hunt_tool import JobHuntTool
 from app.tools.reminder_tool import ReminderTool
 from app.tools.news_tool import NewsTool
 from app.tools.polymarket_tool import PolymarketTool
+from app.tools.doc_tool import DocTool
 
 
 class RememberTool:
@@ -36,6 +37,7 @@ def load_tools(scheduler=None, profile=None, knowledge_graph=None) -> dict:
         "job_hunt": JobHuntTool(profile),
         "news": NewsTool(),
         "polymarket": PolymarketTool(),
+        "doc_gen": DocTool(),
     }
     if scheduler:
         tools["reminder"] = ReminderTool(scheduler)

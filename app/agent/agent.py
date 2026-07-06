@@ -11,7 +11,7 @@ from app.lib.events import log_event
 
 MAX_HISTORY = 20
 WIB = timezone(timedelta(hours=7))
-MEDIA_RE = re.compile(r'\[(?:VIDEO|IMAGE):.*?\]')
+MEDIA_RE = re.compile(r'\[(?:VIDEO|IMAGE|FILE):.*?\]')
 logger = logging.getLogger(__name__)
 
 

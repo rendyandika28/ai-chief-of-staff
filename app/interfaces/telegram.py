@@ -123,7 +123,7 @@ class TelegramBot:
         display = full_text
         if error_ref:
             display = "Maaf, ada error. Coba lagi nanti."
-        display = re.sub(r'\[(?:VIDEO|IMAGE):.*?\]', '', display).strip()
+        display = re.sub(r'\[(?:VIDEO|IMAGE|FILE):.*?\]', '', display).strip()
         await sent_msg.edit_text(display or "Maaf, ada error. Coba lagi nanti.")
 
         # Handle visual outputs FIRST — before memory filter
@@ -134,14 +134,23 @@ class TelegramBot:
             return
         if "[VIDEO:" in full_text or "[IMAGE:" in full_text:
             return
-        self.memory.add(user_id, "assistant", full_text.strip())
+        # File output: simpen teksnya tanpa marker (biar konteks inget udah bikin dok)
+        clean = re.sub(r'\[FILE:.*?\]', '', full_text).strip()
+        self.memory.add(user_id, "assistant", clean)
 
     async def _send_media(self, update: Update, raw: str):
         image_paths = re.findall(r'\[IMAGE:(.*?)\]', raw)
         video_paths = re.findall(r'\[VIDEO:(.*?)\]', raw)
+        file_paths = re.findall(r'\[FILE:(.*?)\]', raw)
 
         valid_imgs = [p for p in image_paths if os.path.exists(p)]
         valid_vids = [p for p in video_paths if os.path.exists(p)]
+
+        for fp in [p for p in file_paths if os.path.exists(p)]:
+            try:
+                await update.message.reply_document(document=open(fp, 'rb'))
+            except Exception:
+                pass
 
         if valid_imgs:
             try:
