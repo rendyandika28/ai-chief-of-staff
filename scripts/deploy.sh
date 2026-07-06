@@ -24,6 +24,6 @@ uv run python -c "import sys; from app.lib.events import log_event; log_event('d
 
 git pull -q origin main
 uv sync -q
-uv run playwright install chromium -q   # idempotent; cepat kalau browser udah ada
+uv run playwright install chromium || true   # idempotent; non-fatal biar gak ngeblok restart (playwright gak punya -q)
 systemctl restart ai-chief
 echo "[$(date -Is)] done"
