@@ -10,11 +10,19 @@ logger = logging.getLogger(__name__)
 class WatcherManager:
     def __init__(self, on_alert=None):
         self.on_alert = on_alert  # set later by the interface (e.g. TelegramBot)
-        self._running = True  # start immediately
+        self._running = True
+        self._pending = []  # (watcher, interval) — dijalanin pas start()
 
     def register(self, watcher, interval_seconds: int):
-        t = threading.Thread(target=self._loop, args=(watcher, interval_seconds), daemon=True)
-        t.start()
+        # Simpen dulu; jangan start thread sampe on_alert kesambung (lihat start()).
+        self._pending.append((watcher, interval_seconds))
+
+    def start(self):
+        """Dipanggil interface SETELAH on_alert di-set, biar tick pertama gak
+        ilang gara-gara alert dibuang (on_alert masih None)."""
+        for watcher, interval in self._pending:
+            threading.Thread(target=self._loop, args=(watcher, interval), daemon=True).start()
+        self._pending = []
 
     def stop(self):
         self._running = False

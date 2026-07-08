@@ -272,6 +272,7 @@ class TelegramBot:
 
         if self._watchers:
             self._watchers.on_alert = self.send_proactive
+            self._watchers.start()  # baru start thread setelah on_alert kesambung
 
         print("Telegram bot running...")
         self._app.run_polling()
