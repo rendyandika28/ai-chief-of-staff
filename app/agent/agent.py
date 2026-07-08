@@ -63,8 +63,10 @@ class Agent:
     def phrase(self, instruction: str) -> str | None:
         """One in-persona line for proactive pings (reminders, nudges, briefs)."""
         try:
+            now = datetime.now(WIB)
             msg = [
-                {"role": "system", "content": self._static_prompt},
+                {"role": "system", "content": self._static_prompt
+                    + f"\n\nHARI INI: {now.strftime('%A, %d %B %Y jam %H:%M WIB')}"},
                 {"role": "user", "content": f"[SISTEM: bukan Rendy yang ngomong] {instruction}"},
             ]
             return self.fast_llm.chat(msg, max_tokens=200).strip() or None
