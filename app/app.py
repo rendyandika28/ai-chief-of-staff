@@ -74,6 +74,46 @@ def create_core():
 
     watchers.register(job_scraper, 21600)  # every 6 hours
 
+    # Kalender — notify meeting bentar lagi (esp. gmeet) + undangan baru yg belum di-RSVP.
+    def calendar_watcher():
+        from app.tools.calendar_tool import fetch_events, load_seen, save_seen
+        now = datetime.now(WIB)
+        try:
+            events = fetch_events(now, now + timedelta(days=7))
+        except FileNotFoundError:
+            return None  # belum ada akun tersambung
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"calendar_watcher: {e}")
+            return None
+
+        seen = load_seen()
+        current_ids = set()
+        alerts = []
+        for e in events:
+            key = e["id"]
+            current_ids.add(key)
+            tags = seen.setdefault(key, [])
+            if e["timed"]:
+                mins = (e["start"] - now).total_seconds() / 60
+                if 0 <= mins <= 16 and "soon" not in tags:
+                    link = f" — {e['gmeet']}" if e["gmeet"] else ""
+                    alerts.append(f"{int(mins)} menit lagi: {e['summary']} [{e['label']}]{link}")
+                    tags.append("soon")
+            if e["needs_action"] and "invite" not in tags:
+                when = e["start"].strftime("%a %d/%m %H:%M")
+                alerts.append(f"Undangan baru: {e['summary']} [{e['label']}] — {when}, belum di-RSVP")
+                tags.append("invite")
+
+        # prune: buang event yg udah lewat (gak ada lagi di window 7 hari ke depan)
+        save_seen({k: v for k, v in seen.items() if k in current_ids})
+        if not alerts:
+            return None
+        return agent.phrase(
+            "Sampaikan ke Rendy dengan gaya lo, ringkas dan to the point:\n" + "\n".join(alerts)
+        )
+
+    watchers.register(calendar_watcher, 300)  # tiap 5 menit
+
     # Morning brief — persistent daily task at 07:00 WIB, survives restarts.
     if not scheduler.has_pending("__morning_brief__"):
         run_at, interval = Scheduler.calc_daily("07:00")
@@ -85,6 +125,14 @@ def create_core():
         if weather:
             try:
                 parts.append(f"Cuaca: {weather.run('jakarta')}")
+            except Exception:
+                pass
+        cal = agent.tools.get("calendar")
+        if cal:
+            try:
+                agenda = cal.run("")
+                if agenda and "Gak ada agenda" not in agenda and "Belum ada akun" not in agenda:
+                    parts.append("Agenda hari ini:\n" + agenda)
             except Exception:
                 pass
         reminders = scheduler.due_today(USER_ID)

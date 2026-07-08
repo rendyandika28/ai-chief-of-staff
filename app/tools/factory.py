@@ -8,6 +8,7 @@ from app.tools.reminder_tool import ReminderTool
 from app.tools.news_tool import NewsTool
 from app.tools.polymarket_tool import PolymarketTool
 from app.tools.doc_tool import DocTool
+from app.tools.calendar_tool import CalendarTool
 
 
 class RememberTool:
@@ -38,6 +39,7 @@ def load_tools(scheduler=None, profile=None, knowledge_graph=None) -> dict:
         "news": NewsTool(),
         "polymarket": PolymarketTool(),
         "doc_gen": DocTool(),
+        "calendar": CalendarTool(),
     }
     if scheduler:
         tools["reminder"] = ReminderTool(scheduler)
