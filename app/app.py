@@ -92,14 +92,15 @@ def create_core():
         alerts = []
         for e in events:
             key = e["id"]
-            tags = seen.get(key, [])
+            # event yg sama bisa muncul di >1 akun — dedup by id (persisted + run ini)
+            done = set(seen.get(key, [])) | set(pending.get(key, []))
             if e["timed"]:
                 mins = (e["start"] - now).total_seconds() / 60
-                if 0 <= mins <= 16 and "soon" not in tags:
+                if 0 <= mins <= 16 and "soon" not in done:
                     link = f" — {e['gmeet']}" if e["gmeet"] else ""
                     alerts.append(f"{int(mins)} menit lagi: {e['summary']} [{e['label']}]{link}")
                     pending.setdefault(key, []).append("soon")
-            if e["needs_action"] and "invite" not in tags:
+            if e["needs_action"] and "invite" not in done:
                 when = e["start"].strftime("%a %d/%m %H:%M")
                 alerts.append(f"Undangan baru: {e['summary']} [{e['label']}] — {when}, belum di-RSVP")
                 pending.setdefault(key, []).append("invite")
