@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from app.schema import extract_json
+
 
 WIB = timezone(timedelta(hours=7))
 
@@ -63,6 +65,22 @@ def _fix_mojibake(s: str) -> str:
 
 
 MATCH_THRESHOLD = 75  # cuma simpan lowongan dgn match >= threshold (preferensi Rendy)
+_LLM_CAP = 30    # max kandidat teratas (by heuristik) yg di-rescore LLM — batesin biaya
+_LLM_BATCH = 8   # jumlah lowongan per panggilan LLM (hemat call)
+
+
+def _cv_blurb(profile: dict) -> str:
+    """Ringkasan profil buat konteks penilaian LLM."""
+    p = profile or {}
+    prefs = p.get("job_preferences", {})
+    return (
+        f"Role: {p.get('role', 'Frontend Engineer')}\n"
+        f"Ringkasan: {(p.get('summary') or '')[:300]}\n"
+        f"Skills: {', '.join(p.get('skills', [])[:14])}\n"
+        f"Role diincar: {', '.join(prefs.get('roles', []))}\n"
+        f"Preferensi: {prefs.get('preferred_location', 'remote')}; {prefs.get('notes', '')}\n"
+        f"Eligibility: {prefs.get('eligibility', '')}"
+    )
 
 # Stack inti CV Rendy — dicari di judul+deskripsi buat skor kedalaman.
 _STACK = ("react", "vue", "angular", "svelte", "next", "nuxt", "typescript",
@@ -143,8 +161,55 @@ class JobHuntTool:
         "mark_applied:<index>, detail:<index>, saved"
     )
 
-    def __init__(self, profile=None):
+    def __init__(self, profile=None, llm=None):
         self._profile = profile
+        self._llm = llm  # fast_llm (Haiku) buat semantic match; opsional — fallback ke heuristik
+
+    def _llm_rescore(self, jobs: list, profile: dict):
+        """Tahap 2: Haiku baca JD lawan CV, override skor + kasih alasan. In-place.
+        Batch biar hemat call; gagal/parse-error → skor heuristik dipertahankan."""
+        cv = _cv_blurb(profile)
+        system = (
+            "Kamu penilai kecocokan lowongan buat kandidat ini. Skor 0-100 seberapa cocok "
+            "TIAP lowongan — pertimbangkan stack, level/seniority, remote/lokasi, tipe kontrak, "
+            "DAN aturan eligibility di bawah.\n\n"
+            "ATURAN ELIGIBILITY (WAJIB — kandidat WNI/Indonesia, TIDAK punya visa kerja negara lain):\n"
+            "- REMOTE di luar Indonesia: cocok kalau terbuka worldwide / nerima kandidat Indonesia & "
+            "gak butuh izin kerja lokal. Kalau JD kekunci region/negara (mis. 'US only', "
+            "'must be authorized to work in X', 'EU residents only') → skor RENDAH (maks ~40).\n"
+            "- ON-SITE di luar Indonesia: cocok HANYA kalau EKSPLISIT nyediain visa sponsorship/relokasi. "
+            "Gak nyebut sponsorship → skor RENDAH (maks ~35).\n"
+            "- Di Indonesia (remote/on-site): eligible normal.\n"
+            "- Remote yg gak nyebut pembatasan apa pun → anggap worldwide, jangan dihukum.\n\n"
+            "Balas HANYA JSON array: "
+            '[{"i":<index>,"score":<0-100>,"reason":"<alasan singkat Bahasa Indonesia, max 12 kata>"}]'
+            f"\n\nKANDIDAT:\n{cv}"
+        )
+        for s in range(0, len(jobs), _LLM_BATCH):
+            batch = jobs[s:s + _LLM_BATCH]
+            listing = "\n".join(
+                f'[{i}] {j.get("title")} @ {j.get("company")} ({j.get("location")}) — '
+                + _strip_html(j.get("description") or "")[:500].replace("\n", " ")
+                for i, j in enumerate(batch)
+            )
+            try:
+                raw = self._llm.chat(
+                    [{"role": "system", "content": system},
+                     {"role": "user", "content": "LOWONGAN:\n" + listing}],
+                    max_tokens=700,
+                )
+                data = extract_json(raw)
+                if not isinstance(data, list):
+                    continue
+                for item in data:
+                    idx = item.get("i")
+                    if isinstance(idx, int) and 0 <= idx < len(batch):
+                        sc = item.get("score")
+                        if isinstance(sc, (int, float)):
+                            batch[idx]["score"] = max(0, min(100, int(sc)))
+                        batch[idx]["reason"] = str(item.get("reason", "")).strip()[:90]
+            except Exception:
+                continue  # LLM down / parse gagal → biarin skor heuristik
 
     def run(self, input: str = "", user_id: str = "") -> str:
         parts = input.strip().split(":", 1)
@@ -261,12 +326,17 @@ class JobHuntTool:
             except Exception:
                 continue  # satu sumber down != gagal total
 
-        # Skor tiap lowongan vs profil, simpen cuma yg >= threshold, urut match tertinggi.
-        # Deskripsi cuma buat scoring — dibuang biar jobs.json tetep ramping.
         profile = self._profile.raw() if self._profile else {}
-        scored = []
+        # Tahap 1 (murah): skor heuristik semua kandidat.
         for j in out:
             j["score"] = match_score(j, profile)
+            j["reason"] = ""
+        # Tahap 2 (LLM): Haiku baca JD lawan CV buat N kandidat teratas — mutasi in-place.
+        if self._llm:
+            self._llm_rescore(sorted(out, key=lambda x: x["score"], reverse=True)[:_LLM_CAP], profile)
+        # Filter final + buang deskripsi (transient, biar jobs.json ramping) + urut match tertinggi.
+        scored = []
+        for j in out:
             j.pop("description", None)
             if j["score"] >= MATCH_THRESHOLD:
                 scored.append(j)
@@ -406,7 +476,7 @@ class JobHuntTool:
                 "id": next_id, "title": title,
                 "company": job.get("company", ""), "location": job.get("location", ""),
                 "url": job.get("url", ""), "source": job.get("source", ""),
-                "scraped_at": job.get("scraped_at", ""),
+                "scraped_at": job.get("scraped_at", ""), "reason": job.get("reason", ""),
                 "score": job.get("score", 0), "status": job.get("status", ""),
             })
             existing_titles.add(title.lower())  # dedup dalam batch yg sama juga
@@ -519,8 +589,18 @@ def _demo():
     assert strong >= 80, strong
     assert weak < 80, weak
     assert offstack < 80, offstack
+
+    # LLM rescore: override skor + isi reason dari JSON balikan (pakai LLM palsu)
+    class _FakeLLM:
+        def chat(self, messages, max_tokens=0):
+            return 'ok: [{"i":0,"score":91,"reason":"cocok react/next remote"}]'
+    jl = [{"title": "Frontend Engineer", "company": "X", "location": "Remote",
+           "description": "React, Next.js", "score": 74, "reason": ""}]
+    JobHuntTool(llm=_FakeLLM())._llm_rescore(jl, prof)
+    assert jl[0]["score"] == 91 and "cocok" in jl[0]["reason"], jl
+
     print(f"OK: filter {len(keep)} keep / {len(drop)} drop · mojibake · prune · "
-          f"match(strong={strong},weak={weak},offstack={offstack})")
+          f"match(strong={strong},weak={weak},offstack={offstack}) · llm-rescore")
 
 
 if __name__ == "__main__":

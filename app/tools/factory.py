@@ -30,12 +30,12 @@ class RememberTool:
         return "(noted)"
 
 
-def load_tools(scheduler=None, profile=None, knowledge_graph=None) -> dict:
+def load_tools(scheduler=None, profile=None, knowledge_graph=None, llm=None) -> dict:
     tools = {
         "time": TimeTool(),
         "weather": WeatherTool(),
         "cctv": CctvTool(),
-        "job_hunt": JobHuntTool(profile),
+        "job_hunt": JobHuntTool(profile, llm),
         "news": NewsTool(),
         "polymarket": PolymarketTool(),
         "doc_gen": DocTool(),

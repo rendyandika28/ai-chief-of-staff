@@ -26,7 +26,7 @@ class Agent:
         self.long_term = long_term_memory
         self.knowledge_graph = knowledge_graph
         self.profile = Profile()
-        self.tools = load_tools(scheduler, self.profile, knowledge_graph)
+        self.tools = load_tools(scheduler, self.profile, knowledge_graph, self.fast_llm)
         # Static prefix (persona + profile) — identical every turn, so cached.
         self._static_prompt = (
             Path("prompts/system.md").read_text(encoding="utf-8")
