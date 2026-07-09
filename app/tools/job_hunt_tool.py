@@ -1,5 +1,6 @@
 """Job search — aggregates free remote-job APIs, ranks by CV match, cover letters."""
 
+import html
 import json
 import os
 import re
@@ -182,7 +183,7 @@ class JobHuntTool:
 
         seen, out = set(), []
         for fetch in (self._from_remotive, self._from_remoteok, self._from_arbeitnow,
-                      self._from_jobicy, self._from_wwr):
+                      self._from_jobicy, self._from_wwr, self._from_linkedin):
             try:
                 for j in fetch(primary):
                     title = _fix_mojibake((j.get("title") or "").strip())
@@ -251,6 +252,46 @@ class JobHuntTool:
                 for j in data.get("jobs", [])
             )
         return out
+
+    def _from_linkedin(self, keyword: str) -> list:
+        # Dua wilayah: Worldwide (remote only — gak relokasi ke LN) + Indonesia (semua,
+        # incl. on-site Jakarta — kandang sendiri). Dedup lintas-wilayah di _fetch_jobs.
+        jobs = []
+        for location, remote_only in (("Worldwide", True), ("Indonesia", False)):
+            try:
+                jobs.extend(self._linkedin_search(keyword, location, remote_only))
+            except Exception:
+                continue  # satu wilayah 429/error != gagal dua-duanya
+        return jobs
+
+    def _linkedin_search(self, keyword: str, location: str, remote_only: bool) -> list:
+        # Endpoint guest publik — HTML kartu job, no auth. f_WT=2 = remote.
+        url = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
+               "keywords=" + urllib.request.quote(keyword) +
+               "&location=" + urllib.request.quote(location) +
+               ("&f_WT=2" if remote_only else "") + "&start=0")
+        req = urllib.request.Request(url, headers={"User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120 Safari/537.36")})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            body = r.read().decode("utf-8", "ignore")
+
+        def rx(pat, s):
+            m = re.search(pat, s, re.S)
+            return html.unescape(m.group(1).strip()) if m else ""
+
+        jobs = []
+        for li in body.split("<li>")[1:]:
+            title = rx(r'base-search-card__title">(.*?)<', li)
+            if not title:
+                continue
+            jobs.append({
+                "title": title,
+                "company": rx(r'base-search-card__subtitle">(?:\s*<a[^>]*>)?(.*?)<', li),
+                "location": rx(r'job-search-card__location">(.*?)<', li) or "Remote",
+                "url": rx(r'href="(https://[a-z]{2,3}\.linkedin\.com/jobs/view/[^"?]+)', li),
+            })
+        return jobs
 
     def _from_wwr(self, keyword: str) -> list:
         # WeWorkRemotely = RSS, bukan JSON. Judul formatnya "Company: Job Title".

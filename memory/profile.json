@@ -81,7 +81,7 @@
   "job_preferences": {
     "roles": ["frontend engineer", "react developer", "vue developer", "senior frontend"],
     "preferred_location": "remote",
-    "avoid_location": "indonesia",
-    "notes": "Avoid jobs requiring BPJS (double employment detection). Prefer international remote or freelance contracts."
+    "avoid_location": "",
+    "notes": "Open to Indonesia roles if the offer fits (previously avoided due to BPJS double-employment detection). Prefer international remote or freelance contracts."
   }
 }
