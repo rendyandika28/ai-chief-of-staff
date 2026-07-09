@@ -14,14 +14,15 @@ import secrets
 import sqlite3
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Body, Depends, FastAPI, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.lib.events import recent
-from app.tools.job_hunt_tool import JOB_DB, build_cover_letter
+from app.tools.job_hunt_tool import JOB_DB, STATUS_DB, build_cover_letter
 
 MEMORY_DIR = os.getenv("MEMORY_DIR", "memory")
+STAGES = ("saved", "applied", "interview", "offer", "rejected")  # 'saved' = default (gak ada entri)
 
 
 def _load_jobs() -> list:
@@ -29,6 +30,17 @@ def _load_jobs() -> list:
         return json.loads(JOB_DB.read_text())
     except (OSError, json.JSONDecodeError):
         return []
+
+
+def _load_status() -> dict:
+    try:
+        return json.loads(STATUS_DB.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _stage_of(status: dict, job_id) -> str:
+    return (status.get(str(job_id)) or {}).get("stage", "saved")
 
 
 def _load_profile() -> dict:
@@ -162,7 +174,31 @@ def api_state(_: bool = Depends(auth)):
 def api_jobs(_: bool = Depends(auth)):
     # match tertinggi dulu, lalu terbaru (id) sebagai tie-break
     jobs = sorted(_load_jobs(), key=lambda j: (j.get("score", 0), j.get("id", 0)), reverse=True)
-    return JSONResponse({"total": len(jobs), "jobs": jobs})
+    status = _load_status()
+    for j in jobs:
+        j["stage"] = _stage_of(status, j.get("id"))
+    counts = {s: sum(1 for j in jobs if j["stage"] == s) for s in STAGES}
+    return JSONResponse({"total": len(jobs), "jobs": jobs, "counts": counts})
+
+
+@app.post("/api/jobs/{job_id}/stage")
+def api_set_stage(job_id: int, payload: dict = Body(...), _: bool = Depends(auth)):
+    stage = (payload or {}).get("stage", "")
+    if stage not in STAGES:
+        raise HTTPException(400, "stage gak valid")
+    ids = {j.get("id") for j in _load_jobs()}
+    if job_id not in ids:
+        raise HTTPException(404, "lowongan gak ada")
+    status = {k: v for k, v in _load_status().items() if k.isdigit() and int(k) in ids}  # buang orphan
+    if stage == "saved":
+        status.pop(str(job_id), None)  # balik default = hapus entri
+    else:
+        status[str(job_id)] = {"stage": stage, "updated_at": datetime.now(timezone.utc).isoformat()}
+    try:
+        STATUS_DB.write_text(json.dumps(status, indent=2, ensure_ascii=False))
+    except OSError:
+        raise HTTPException(500, "gagal nulis status — mount dashboard masih read-only?")
+    return JSONResponse({"ok": True, "stage": stage})
 
 
 @app.get("/api/cover_letter/{job_id}")
@@ -388,11 +424,27 @@ function render(s){
 
 // ---- Lowongan ----
 function matchColor(s){ return s>=90?'mint':s>=75?'amber':'muted'; }
+const STAGES = ['saved','applied','interview','offer','rejected'];
+const STAGE_ON = {
+  saved:'bg-line text-txt border-muted/50',
+  applied:'bg-azure/20 text-azure border-azure/50',
+  interview:'bg-amber/20 text-amber border-amber/50',
+  offer:'bg-mint/20 text-mint border-mint/50',
+  rejected:'bg-coral/20 text-coral border-coral/50',
+};
+async function setStage(id, stage){
+  try{
+    const r = await fetch(`/api/jobs/${id}/stage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stage})});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); alert(e.detail||'gagal update stage'); return; }
+    loadJobs();
+  }catch(e){ alert('gagal update stage'); }
+}
 function jobCard(j){
-  const applied = j.status==='applied';
   const url = j.url || ('https://www.google.com/search?q='+encodeURIComponent(j.title)+'+apply');
   const score = j.score ?? 0;
   const c = matchColor(score);
+  const stage = j.stage || 'saved';
+  const buttons = STAGES.map(s=>`<button onclick="setStage(${j.id},'${s}')" class="px-2 py-0.5 rounded border text-[10px] font-mono capitalize ${stage===s?STAGE_ON[s]:'text-muted border-line hover:bg-surface2'}">${s}</button>`).join('');
   return `<div class="rounded-lg bg-surface2/60 border border-line px-3 py-2.5">
     <div class="flex items-start gap-3">
       <div class="shrink-0 w-11 text-center">
@@ -400,7 +452,7 @@ function jobCard(j){
         <div class="font-mono text-[9px] text-muted tracking-wider mt-0.5">MATCH</div>
       </div>
       <div class="min-w-0 flex-1">
-        <div class="text-sm font-600 break-words">${esc(j.title)} ${applied?'<span class="text-[10px] text-mint font-mono">✓ APPLIED</span>':''}</div>
+        <div class="text-sm font-600 break-words">${esc(j.title)}</div>
         <div class="text-[12px] text-muted mt-0.5">${esc(j.company)||'—'} · ${esc(j.location)||'Remote'}</div>
         ${j.source?`<span class="inline-block mt-1 px-1.5 py-0.5 rounded bg-azure/15 text-azure font-mono text-[10px] tracking-wide">via ${esc(j.source)}</span>`:''}
         ${j.reason?`<div class="text-[11px] text-muted italic mt-1">💡 ${esc(j.reason)}</div>`:''}
@@ -410,6 +462,7 @@ function jobCard(j){
         <button onclick="toggleCover(${j.id}, this)" class="text-[11px] font-mono text-mint hover:underline">cover letter</button>
       </div>
     </div>
+    <div class="flex flex-wrap gap-1 mt-2">${buttons}</div>
     <pre id="cl-${j.id}" class="hidden mt-2 p-3 rounded-lg bg-ink border border-line text-[12px] text-txt font-mono whitespace-pre-wrap overflow-x-auto"></pre>
   </div>`;
 }
@@ -417,7 +470,9 @@ async function loadJobs(){
   try{
     const r = await fetch('/api/jobs',{cache:'no-store'}); if(!r.ok) return;
     const d = await r.json();
-    document.getElementById('jobcount').textContent = d.total+' lowongan (match ≥75%) · urut kecocokan tertinggi · scraper tiap 6 jam';
+    const c = d.counts||{};
+    document.getElementById('jobcount').textContent =
+      `${d.total} lowongan · Saved ${c.saved||0} · Applied ${c.applied||0} · Interview ${c.interview||0} · Offer ${c.offer||0} · Rejected ${c.rejected||0}`;
     const box = document.getElementById('jobs');
     box.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('')
       : '<div class="text-muted text-sm px-2 py-6 text-center">Belum ada lowongan.</div>';

@@ -18,6 +18,7 @@ memory/knowledge.db
 memory/_test_*.db
 memory/events.db
 memory/jobs.json
+memory/job_status.json
 memory/screenshot_*.png
 memory/cctv_*.png
 memory/cctv_*.mp4

@@ -27,6 +27,12 @@ PLATFORMS = {
 # that folder) can serve it. Old data/jobs.json is abandoned — it was polluted with
 # non-frontend false positives from the previous over-loose title filter.
 JOB_DB = Path(os.getenv("MEMORY_DIR", "memory")) / "jobs.json"
+# job_status.json = stage tiap lowongan, DITULIS dashboard (tombol), DIBACA bot (prune/kuota).
+# Single-writer per file → gak ada race sama jobs.json.
+STATUS_DB = Path(os.getenv("MEMORY_DIR", "memory")) / "job_status.json"
+SAVED_CAP = 50    # max lowongan 'saved' (belum ditindak) yg disimpen
+PRUNE_DAYS = 30   # umur lowongan saved sebelum di-cek masih hidup gak
+ACTIONED = ("applied", "interview", "offer", "rejected")  # keluar kuota, disimpen buat riwayat
 
 # Judul diterima kalau ngandung salah satu sinyal frontend ini — dari stack CV Rendy
 # (React/Vue/Next/Nuxt/TS). Sengaja TANPA "javascript"/"typescript" telanjang (terlalu
@@ -103,6 +109,36 @@ def _source_from_url(url: str) -> str:
 
 def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]+>", " ", s or "")
+
+
+def _load_status() -> dict:
+    """{ '<id>': {'stage': ..., 'updated_at': ...} } — ditulis dashboard, dibaca bot."""
+    if not STATUS_DB.exists():
+        return {}
+    try:
+        return json.loads(STATUS_DB.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _stage_of(status: dict, job_id) -> str:
+    return (status.get(str(job_id)) or {}).get("stage", "saved")
+
+
+def _alive(url: str) -> bool:
+    """Best-effort liveness. 404/410 = mati → False. Error lain (network hiccup, 403/405,
+    HEAD ditolak) → anggap hidup, JANGAN hapus. LinkedIn dll kadang gak 404 beneran, jadi
+    ini nyaring yg jelas mati aja (Remotive/RemoteOK/WWR 404 bersih)."""
+    if not url:
+        return True
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:  # headers doang, body gak dibaca
+            return r.status < 400
+    except urllib.error.HTTPError as e:
+        return e.code not in (404, 410)
+    except Exception:
+        return True
 
 
 def match_score(job: dict, profile: dict) -> int:
@@ -481,17 +517,35 @@ class JobHuntTool:
             })
             existing_titles.add(title.lower())  # dedup dalam batch yg sama juga
             next_id += 1
-        existing = self._prune(existing)
+        existing = self._prune_and_cap(existing)
         JOB_DB.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
 
-    def _prune(self, jobs: list, days: int = 30) -> list:
-        """Buang lowongan non-applied yg lebih tua dari `days` biar jobs.json gak numpuk.
-        Yang applied & yang gak ada timestamp selalu disimpen (id tetap unik & stabil)."""
-        cutoff = (datetime.now(WIB) - timedelta(days=days)).isoformat()
-        return [
-            j for j in jobs
-            if j.get("status") == "applied" or not j.get("scraped_at") or j["scraped_at"] >= cutoff
-        ]
+    def _prune_and_cap(self, jobs: list) -> list:
+        """Retensi lowongan:
+        - Yang udah ditindak (applied/interview/offer/rejected) → SELALU disimpen (riwayat),
+          gak kena umur/kuota.
+        - Yang 'saved' & udah lewat PRUNE_DAYS → di-cek masih hidup: mati (404) dibuang,
+          hidup di-keep & umurnya di-reset.
+        - 'saved' dibatasi SAVED_CAP terbaik by score; sisanya kebuang (actioned gak ngitung)."""
+        status = _load_status()
+        now = datetime.now(WIB)
+        cutoff = (now - timedelta(days=PRUNE_DAYS)).isoformat()
+        kept = []
+        for j in jobs:
+            if _stage_of(status, j.get("id")) in ACTIONED:
+                kept.append(j)
+                continue
+            if j.get("scraped_at") and j["scraped_at"] < cutoff:
+                if not _alive(j.get("url", "")):
+                    continue                      # mati → hapus
+                j["scraped_at"] = now.isoformat()  # hidup → reset umur (cek lagi ~30 hari)
+            kept.append(j)
+        saved = sorted(
+            (j for j in kept if _stage_of(status, j.get("id")) not in ACTIONED),
+            key=lambda x: x.get("score", 0), reverse=True,
+        )[:SAVED_CAP]
+        actioned = [j for j in kept if _stage_of(status, j.get("id")) in ACTIONED]
+        return actioned + saved
 
     def _mark_applied(self, arg: str) -> str:
         try:
@@ -567,15 +621,26 @@ def _demo():
     assert _fix_mojibake(broken) == arabic, _fix_mojibake(broken)
     assert _fix_mojibake("Worldwide") == "Worldwide"
 
-    # prune: buang non-applied lawas, simpen applied lawas & yg fresh
+    # prune_and_cap: actioned selalu disimpen; saved-lawas-mati dibuang; saved di-cap by score.
+    global _alive, _load_status, SAVED_CAP  # rebind di modul yg jalan (hindari network)
+    _alive = lambda u: False  # anggap semua mati
     old = (datetime.now(WIB) - timedelta(days=60)).isoformat()
     fresh = datetime.now(WIB).isoformat()
-    pruned = JobHuntTool()._prune([
-        {"id": 0, "scraped_at": old, "status": ""},           # buang
-        {"id": 1, "scraped_at": old, "status": "applied"},    # simpen (applied)
-        {"id": 2, "scraped_at": fresh, "status": ""},         # simpen (fresh)
+    _load_status = lambda: {"1": {"stage": "applied"}}  # id 1 = applied
+    res = JobHuntTool()._prune_and_cap([
+        {"id": 0, "scraped_at": old, "url": "x", "score": 90},   # saved+lawas+mati → buang
+        {"id": 1, "scraped_at": old, "url": "x", "score": 50},   # applied → simpen (riwayat)
+        {"id": 2, "scraped_at": fresh, "url": "", "score": 80},  # saved+fresh → simpen
     ])
-    assert {j["id"] for j in pruned} == {1, 2}, pruned
+    assert {j["id"] for j in res} == {1, 2}, res
+    _load_status = lambda: {}  # semua saved
+    SAVED_CAP = 1
+    res2 = JobHuntTool()._prune_and_cap([
+        {"id": 3, "scraped_at": fresh, "url": "", "score": 90},
+        {"id": 4, "scraped_at": fresh, "url": "", "score": 70},
+    ])
+    assert {j["id"] for j in res2} == {3}, res2  # cap → simpen skor tertinggi
+    SAVED_CAP = 50
 
     # match_score: role frontend + stack + remote lolos ≥80; junior/off-stack gugur
     prof = {"job_preferences": {"roles": ["frontend engineer", "react developer"]}}
