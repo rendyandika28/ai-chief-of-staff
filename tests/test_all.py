@@ -241,7 +241,7 @@ with test("Watcher register + fire calls on_alert"):
     from app.agent.watcher import WatcherManager
     alerts = []
     wm = WatcherManager(on_alert=alerts.append)
-    wm.register(lambda: "alert!", 1); time.sleep(2)
+    wm.register(lambda: "alert!", 1); wm.start(); time.sleep(2)
     assert alerts
 
 print(f"\n{'=' * 60}")

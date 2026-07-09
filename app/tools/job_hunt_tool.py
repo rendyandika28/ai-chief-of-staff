@@ -50,6 +50,17 @@ def _frontend_dominant(title_norm: str, keys: set) -> bool:
     return any(k in title_norm for k in keys) and not _BACKEND_RE.search(title_norm)
 
 
+def _fix_mojibake(s: str) -> str:
+    """Perbaiki teks UTF-8 yg ke-double-encode (mis. lokasi RemoteOK 'Ø§Ù...' → 'الرياض').
+    Cuma jalan kalau kedeteksi pola mojibake & round-trip latin1→utf8 sukses."""
+    if not s or not any(c in s for c in "ÃÂØÙÐ"):
+        return s
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
 def build_cover_letter(job: dict, profile: dict) -> str:
     """Static template letter from profile data — no LLM, zero cost. Shared by the
     Telegram report and the dashboard so the wording stays in one place."""
@@ -174,7 +185,7 @@ class JobHuntTool:
                       self._from_jobicy, self._from_wwr):
             try:
                 for j in fetch(primary):
-                    title = (j.get("title") or "").strip()
+                    title = _fix_mojibake((j.get("title") or "").strip())
                     if not title:
                         continue
                     tl = title.lower().replace("-", " ")
@@ -186,8 +197,8 @@ class JobHuntTool:
                     seen.add(dedup)
                     out.append({
                         "title": title,
-                        "company": (j.get("company") or "").strip(),
-                        "location": j.get("location") or "Remote",
+                        "company": _fix_mojibake((j.get("company") or "").strip()),
+                        "location": _fix_mojibake(j.get("location") or "Remote"),
                         "url": (j.get("url") or "").strip(),
                     })
             except Exception:
@@ -272,40 +283,54 @@ class JobHuntTool:
         JOB_DB.parent.mkdir(parents=True, exist_ok=True)
         existing = self._load_jobs()
         existing_titles = {j.get("title", "").lower() for j in existing}
-        next_id = len(existing)
+        # id monotonik (max+1), BUKAN len — prune bisa bikin len < id tertinggi → tabrakan.
+        next_id = max((j.get("id", -1) for j in existing), default=-1) + 1
         for job in jobs:
-            if job.get("title", "").lower() in existing_titles:
+            title = job.get("title", "")
+            if title.lower() in existing_titles:
                 continue
             existing.append({
-                "id": next_id, "title": job.get("title", ""),
+                "id": next_id, "title": title,
                 "company": job.get("company", ""), "location": job.get("location", ""),
                 "url": job.get("url", ""), "scraped_at": job.get("scraped_at", ""),
                 "score": job.get("score", 0), "status": job.get("status", ""),
             })
+            existing_titles.add(title.lower())  # dedup dalam batch yg sama juga
             next_id += 1
+        existing = self._prune(existing)
         JOB_DB.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+
+    def _prune(self, jobs: list, days: int = 30) -> list:
+        """Buang lowongan non-applied yg lebih tua dari `days` biar jobs.json gak numpuk.
+        Yang applied & yang gak ada timestamp selalu disimpen (id tetap unik & stabil)."""
+        cutoff = (datetime.now(WIB) - timedelta(days=days)).isoformat()
+        return [
+            j for j in jobs
+            if j.get("status") == "applied" or not j.get("scraped_at") or j["scraped_at"] >= cutoff
+        ]
 
     def _mark_applied(self, arg: str) -> str:
         try:
-            idx = int(arg)
+            jid = int(arg)
         except ValueError:
-            return "Error: index must be number"
+            return "Error: ID harus angka"
         jobs = self._load_jobs()
-        if idx < 0 or idx >= len(jobs):
-            return f"Index {idx} out of range"
-        jobs[idx]["status"] = "applied"
+        job = next((j for j in jobs if j.get("id") == jid), None)
+        if job is None:
+            return f"ID {jid} gak ketemu"
+        job["status"] = "applied"
         JOB_DB.write_text(json.dumps(jobs, indent=2, ensure_ascii=False))
-        return f"✓ [{idx}] {jobs[idx]['title']} — marked applied"
+        return f"✓ [{jid}] {job['title']} — marked applied"
 
     def _detail(self, arg: str) -> str:
         try:
-            idx = int(arg)
+            jid = int(arg)
         except ValueError:
-            return "Error: index must be number"
+            return "Error: ID harus angka"
         jobs = self._load_jobs()
-        if idx < 0 or idx >= len(jobs):
-            return f"Index {idx} out of range (0-{len(jobs)-1})"
-        j = jobs[idx]
+        j = next((x for x in jobs if x.get("id") == jid), None)
+        if j is None:
+            return f"ID {jid} gak ketemu"
         return (
             f"[{j['id']}] {j['title']}\n"
             f"  Company: {j.get('company','?')}\n"
@@ -351,7 +376,23 @@ def _demo():
         assert not _frontend_dominant(n(t), keys), f"harusnya DROP: {t}"
     # 'java' jangan kena 'javascript'
     assert _BACKEND_RE.search("java engineer") and not _BACKEND_RE.search("react javascript dev")
-    print("OK: frontend-dominant filter", len(keep), "keep /", len(drop), "drop")
+
+    # mojibake: teks rusak diperbaiki (simulasi double-encode), teks bersih gak disentuh
+    arabic = "الرياض"
+    broken = arabic.encode("utf-8").decode("latin-1")
+    assert _fix_mojibake(broken) == arabic, _fix_mojibake(broken)
+    assert _fix_mojibake("Worldwide") == "Worldwide"
+
+    # prune: buang non-applied lawas, simpen applied lawas & yg fresh
+    old = (datetime.now(WIB) - timedelta(days=60)).isoformat()
+    fresh = datetime.now(WIB).isoformat()
+    pruned = JobHuntTool()._prune([
+        {"id": 0, "scraped_at": old, "status": ""},           # buang
+        {"id": 1, "scraped_at": old, "status": "applied"},    # simpen (applied)
+        {"id": 2, "scraped_at": fresh, "status": ""},         # simpen (fresh)
+    ])
+    assert {j["id"] for j in pruned} == {1, 2}, pruned
+    print("OK: filter", len(keep), "keep /", len(drop), "drop · mojibake · prune")
 
 
 if __name__ == "__main__":

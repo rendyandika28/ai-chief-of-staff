@@ -1,7 +1,20 @@
 import logging
-from anthropic import Anthropic
+import time
+from anthropic import (Anthropic, APIConnectionError, APITimeoutError,
+                       APIStatusError, InternalServerError, RateLimitError)
 
 from app.config.settings import settings
+
+_RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
+
+
+def _transient(e) -> bool:
+    """Error yg layak di-retry: koneksi/timeout, rate limit, 5xx, overloaded (529)."""
+    if isinstance(e, (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)):
+        return True
+    if isinstance(e, APIStatusError):
+        return getattr(e, "status_code", None) in _RETRY_STATUS
+    return False
 
 
 class ClaudeLLM:
@@ -10,13 +23,16 @@ class ClaudeLLM:
         self.model = model or settings.ANTHROPIC_MODEL
 
     def chat(self, messages: list, max_tokens: int = 4096) -> str:
-        try:
-            kwargs = self._build_kwargs(messages, max_tokens)
-            response = self.client.messages.create(**kwargs)
-            return self._extract_text(response)
-        except Exception as e:
-            logging.error(f"Claude API error: {e}")
-            raise
+        kwargs = self._build_kwargs(messages, max_tokens)
+        for attempt in range(3):
+            try:
+                return self._extract_text(self.client.messages.create(**kwargs))
+            except Exception as e:
+                if attempt == 2 or not _transient(e):
+                    logging.error(f"Claude API error: {e}")
+                    raise
+                logging.warning(f"Claude retry {attempt+1}/2: {e}")
+                time.sleep(1.5 * (attempt + 1))
 
     def stream_with_tools(self, messages: list, tools: list, runner, max_tokens: int = 4096):
         """Native tool-use loop: streams the reply in-persona, calling tools as the
@@ -34,10 +50,25 @@ class ClaudeLLM:
                     kwargs["system"] = system
                 if tools:
                     kwargs["tools"] = tools
-                with self.client.messages.stream(**kwargs) as stream:
-                    for text in stream.text_stream:
-                        yield text
-                    final = stream.get_final_message()
+
+                # Retry buka stream pada error transient — TAPI cuma selama belum ada
+                # token kekirim di call ini (gak bisa nge-un-yield yg udah lewat).
+                attempt = 0
+                while True:
+                    produced = False
+                    try:
+                        with self.client.messages.stream(**kwargs) as stream:
+                            for text in stream.text_stream:
+                                produced = True
+                                yield text
+                            final = stream.get_final_message()
+                        break
+                    except Exception as e:
+                        attempt += 1
+                        if produced or attempt > 2 or not _transient(e):
+                            raise
+                        logging.warning(f"stream retry {attempt}/2: {e}")
+                        time.sleep(1.5 * attempt)
 
                 if final.stop_reason != "tool_use":
                     return
@@ -55,7 +86,8 @@ class ClaudeLLM:
                 chat.append({"role": "user", "content": results})
         except Exception as e:
             logging.error(f"Claude tool-stream error: {e}")
-            yield ""
+            # Jangan diem — kasih tau user ada gangguan (nyambung ke teks yg mungkin udah kekirim).
+            yield "\n\n⚠️ Waduh, lagi ada gangguan pas mroses. Coba lagi bentar ya."
 
     def _split(self, messages: list):
         system = None
