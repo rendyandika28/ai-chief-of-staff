@@ -62,6 +62,50 @@ def _fix_mojibake(s: str) -> str:
         return s
 
 
+MATCH_THRESHOLD = 80  # cuma simpan lowongan dgn match >= 80% (preferensi Rendy)
+
+# Stack inti CV Rendy — dicari di judul+deskripsi buat skor kedalaman.
+_STACK = ("react", "vue", "angular", "svelte", "next", "nuxt", "typescript",
+          "javascript", "tailwind", "scss", "vuetify", "bootstrap", "redux", "html", "css")
+_STRONG_TITLE = ("frontend", "front end", "react", "vue", "angular", "svelte",
+                 "next", "nuxt", "ui engineer", "ui developer")
+_JUNIOR_RE = re.compile(r"\b(junior|intern(ship)?|graduate|trainee|entry.level)\b")
+
+
+def _strip_html(s: str) -> str:
+    return re.sub(r"<[^>]+>", " ", s or "")
+
+
+def match_score(job: dict, profile: dict) -> int:
+    """Skor 0–100 seberapa cocok lowongan sama profil Rendy. Deterministik & transparan:
+    judul (sinyal terkuat) + kedalaman stack di judul/deskripsi + konteks remote/Indonesia,
+    dikurangi penalti kalau junior/intern. Deskripsi bikin lebih akurat; tanpa itu skor
+    jatuh ke judul aja."""
+    title = (job.get("title") or "").lower().replace("-", " ")
+    text = title + " " + _strip_html(job.get("description") or "").lower()
+    roles = [r.lower() for r in (profile or {}).get("job_preferences", {}).get("roles", [])]
+
+    if any(k in title for k in _STRONG_TITLE) or any(r in title for r in roles):
+        base = 74
+    elif "web developer" in title:
+        base = 52
+    else:
+        base = 38
+
+    stack = min(20, sum(1 for s in _STACK if s in text) * 4)  # +4/term unik, cap 20
+
+    loc = (job.get("location") or "").lower()
+    if any(w in text for w in ("remote", "contract", "freelance")):
+        ctx = 10
+    elif "indonesia" in loc or "indonesia" in text:
+        ctx = 8
+    else:
+        ctx = 6
+
+    penalty = 18 if _JUNIOR_RE.search(title) else 0  # Rendy 5+ thn — junior kurang cocok
+    return max(0, min(100, base + stack + ctx - penalty))
+
+
 def build_cover_letter(job: dict, profile: dict) -> str:
     """Static template letter from profile data — no LLM, zero cost. Shared by the
     Telegram report and the dashboard so the wording stays in one place."""
@@ -142,15 +186,13 @@ class JobHuntTool:
 
         existing = self._load_jobs()
         existing_titles = {j.get("title", "").lower() for j in existing}
+        # fresh udah di-skor & difilter >= MATCH_THRESHOLD, urut match tertinggi.
         new_jobs = [j for j in fresh if j["title"].lower() not in existing_titles]
 
         if not new_jobs:
-            return f"0 lowongan baru '{role}' di {location}. Total {len(existing)} tersimpan."
+            return (f"0 lowongan baru '{role}' (match ≥{MATCH_THRESHOLD}%) di {location}. "
+                    f"Total {len(existing)} tersimpan.")
 
-        skills = self._profile.raw().get("skills", []) if self._profile else []
-        for j in new_jobs:
-            j["score"] = sum(1 for s in skills if s.lower() in j["title"].lower())
-        new_jobs.sort(key=lambda j: j.get("score", 0), reverse=True)
         top = new_jobs[:10]
 
         now = datetime.now(WIB)
@@ -166,7 +208,7 @@ class JobHuntTool:
             lines.append(
                 f"{'─'*40}\n"
                 f"📌 {j['title']}" + (f" — {j['company']}" if j.get('company') else "") + "\n"
-                f"   {j.get('location','Remote')} | Score: {j['score']} | ID: [{j.get('id','?')}]\n"
+                f"   {j.get('location','Remote')} | Match: {j['score']}% | ID: [{j.get('id','?')}]\n"
                 f"   URL: {jurl}\n\n"
                 f"📝 Cover Letter:\n" + build_cover_letter(j, profile)
             )
@@ -201,10 +243,22 @@ class JobHuntTool:
                         "company": _fix_mojibake((j.get("company") or "").strip()),
                         "location": _fix_mojibake(j.get("location") or "Remote"),
                         "url": (j.get("url") or "").strip(),
+                        "description": j.get("description") or "",  # transient, buat scoring — gak disimpen
                     })
             except Exception:
                 continue  # satu sumber down != gagal total
-        return out[:40]
+
+        # Skor tiap lowongan vs profil, simpen cuma yg >= threshold, urut match tertinggi.
+        # Deskripsi cuma buat scoring — dibuang biar jobs.json tetep ramping.
+        profile = self._profile.raw() if self._profile else {}
+        scored = []
+        for j in out:
+            j["score"] = match_score(j, profile)
+            j.pop("description", None)
+            if j["score"] >= MATCH_THRESHOLD:
+                scored.append(j)
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored[:40]
 
     @staticmethod
     def _get(url: str):
@@ -216,7 +270,8 @@ class JobHuntTool:
         data = self._get("https://remotive.com/api/remote-jobs?search=" + urllib.request.quote(keyword))
         return [
             {"title": j.get("title"), "company": j.get("company_name"),
-             "location": j.get("candidate_required_location") or "Remote", "url": j.get("url")}
+             "location": j.get("candidate_required_location") or "Remote", "url": j.get("url"),
+             "description": j.get("description")}
             for j in data.get("jobs", [])
         ]
 
@@ -225,7 +280,8 @@ class JobHuntTool:
         data = self._get("https://remoteok.com/api")
         return [
             {"title": j.get("position"), "company": j.get("company"),
-             "location": j.get("location") or "Remote", "url": j.get("url")}
+             "location": j.get("location") or "Remote", "url": j.get("url"),
+             "description": (j.get("description") or "") + " " + " ".join(j.get("tags", []))}
             for j in data if isinstance(j, dict) and j.get("position")
         ]
 
@@ -233,7 +289,8 @@ class JobHuntTool:
         data = self._get("https://www.arbeitnow.com/api/job-board-api")
         return [
             {"title": j.get("title"), "company": j.get("company_name"),
-             "location": j.get("location") or "Remote", "url": j.get("url")}
+             "location": j.get("location") or "Remote", "url": j.get("url"),
+             "description": (j.get("description") or "") + " " + " ".join(j.get("tags", []))}
             for j in data.get("data", []) if j.get("remote")
         ]
 
@@ -248,7 +305,8 @@ class JobHuntTool:
                 continue
             out.extend(
                 {"title": j.get("jobTitle"), "company": j.get("companyName"),
-                 "location": j.get("jobGeo") or "Remote", "url": j.get("url")}
+                 "location": j.get("jobGeo") or "Remote", "url": j.get("url"),
+                 "description": j.get("jobExcerpt") or j.get("jobDescription")}
                 for j in data.get("jobs", [])
             )
         return out
@@ -309,6 +367,7 @@ class JobHuntTool:
                 "company": company if sep else "",
                 "location": item.findtext("region") or "Remote",
                 "url": item.findtext("link"),
+                "description": item.findtext("description"),
             })
         return jobs
 
@@ -433,7 +492,21 @@ def _demo():
         {"id": 2, "scraped_at": fresh, "status": ""},         # simpen (fresh)
     ])
     assert {j["id"] for j in pruned} == {1, 2}, pruned
-    print("OK: filter", len(keep), "keep /", len(drop), "drop · mojibake · prune")
+
+    # match_score: role frontend + stack + remote lolos ≥80; junior/off-stack gugur
+    prof = {"job_preferences": {"roles": ["frontend engineer", "react developer"]}}
+    strong = match_score({"title": "Senior Frontend Engineer",
+                          "description": "React, Next.js, TypeScript, Tailwind. Remote.",
+                          "location": "Worldwide"}, prof)
+    weak = match_score({"title": "Junior Frontend Developer",
+                        "description": "HTML, CSS basics", "location": "Onsite"}, prof)
+    offstack = match_score({"title": "PHP Web Developer",
+                            "description": "Laravel, MySQL", "location": "Remote"}, prof)
+    assert strong >= 80, strong
+    assert weak < 80, weak
+    assert offstack < 80, offstack
+    print(f"OK: filter {len(keep)} keep / {len(drop)} drop · mojibake · prune · "
+          f"match(strong={strong},weak={weak},offstack={offstack})")
 
 
 if __name__ == "__main__":

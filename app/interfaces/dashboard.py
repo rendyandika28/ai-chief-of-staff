@@ -160,8 +160,9 @@ def api_state(_: bool = Depends(auth)):
 
 @app.get("/api/jobs")
 def api_jobs(_: bool = Depends(auth)):
-    jobs = _load_jobs()
-    return JSONResponse({"total": len(jobs), "jobs": list(reversed(jobs))})  # terbaru dulu
+    # match tertinggi dulu, lalu terbaru (id) sebagai tie-break
+    jobs = sorted(_load_jobs(), key=lambda j: (j.get("score", 0), j.get("id", 0)), reverse=True)
+    return JSONResponse({"total": len(jobs), "jobs": jobs})
 
 
 @app.get("/api/cover_letter/{job_id}")
@@ -386,11 +387,18 @@ function render(s){
 }
 
 // ---- Lowongan ----
+function matchColor(s){ return s>=90?'mint':s>=80?'amber':'muted'; }
 function jobCard(j){
   const applied = j.status==='applied';
   const url = j.url || ('https://www.google.com/search?q='+encodeURIComponent(j.title)+'+apply');
+  const score = j.score ?? 0;
+  const c = matchColor(score);
   return `<div class="rounded-lg bg-surface2/60 border border-line px-3 py-2.5">
     <div class="flex items-start gap-3">
+      <div class="shrink-0 w-11 text-center">
+        <div class="font-display font-700 text-lg leading-none text-${c}">${score}<span class="text-[10px]">%</span></div>
+        <div class="font-mono text-[9px] text-muted tracking-wider mt-0.5">MATCH</div>
+      </div>
       <div class="min-w-0 flex-1">
         <div class="text-sm font-600 break-words">${esc(j.title)} ${applied?'<span class="text-[10px] text-mint font-mono">✓ APPLIED</span>':''}</div>
         <div class="text-[12px] text-muted mt-0.5">${esc(j.company)||'—'} · ${esc(j.location)||'Remote'}</div>
@@ -407,7 +415,7 @@ async function loadJobs(){
   try{
     const r = await fetch('/api/jobs',{cache:'no-store'}); if(!r.ok) return;
     const d = await r.json();
-    document.getElementById('jobcount').textContent = d.total+' lowongan tersimpan · scraper jalan tiap 6 jam';
+    document.getElementById('jobcount').textContent = d.total+' lowongan (match ≥80%) · urut kecocokan tertinggi · scraper tiap 6 jam';
     const box = document.getElementById('jobs');
     box.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('')
       : '<div class="text-muted text-sm px-2 py-6 text-center">Belum ada lowongan.</div>';
