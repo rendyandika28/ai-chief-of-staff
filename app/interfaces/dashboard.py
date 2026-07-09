@@ -387,7 +387,7 @@ function render(s){
 }
 
 // ---- Lowongan ----
-function matchColor(s){ return s>=90?'mint':s>=80?'amber':'muted'; }
+function matchColor(s){ return s>=90?'mint':s>=75?'amber':'muted'; }
 function jobCard(j){
   const applied = j.status==='applied';
   const url = j.url || ('https://www.google.com/search?q='+encodeURIComponent(j.title)+'+apply');
@@ -415,7 +415,7 @@ async function loadJobs(){
   try{
     const r = await fetch('/api/jobs',{cache:'no-store'}); if(!r.ok) return;
     const d = await r.json();
-    document.getElementById('jobcount').textContent = d.total+' lowongan (match ≥80%) · urut kecocokan tertinggi · scraper tiap 6 jam';
+    document.getElementById('jobcount').textContent = d.total+' lowongan (match ≥75%) · urut kecocokan tertinggi · scraper tiap 6 jam';
     const box = document.getElementById('jobs');
     box.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('')
       : '<div class="text-muted text-sm px-2 py-6 text-center">Belum ada lowongan.</div>';

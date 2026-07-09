@@ -62,7 +62,7 @@ def _fix_mojibake(s: str) -> str:
         return s
 
 
-MATCH_THRESHOLD = 80  # cuma simpan lowongan dgn match >= 80% (preferensi Rendy)
+MATCH_THRESHOLD = 75  # cuma simpan lowongan dgn match >= threshold (preferensi Rendy)
 
 # Stack inti CV Rendy — dicari di judul+deskripsi buat skor kedalaman.
 _STACK = ("react", "vue", "angular", "svelte", "next", "nuxt", "typescript",
