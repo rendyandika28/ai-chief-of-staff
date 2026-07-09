@@ -8,6 +8,7 @@ Run:  uv run uvicorn app.interfaces.dashboard:app --host 0.0.0.0 --port 8000
 Auth: HTTP Basic via DASH_USER / DASH_PASS env vars.
 """
 
+import json
 import os
 import secrets
 import sqlite3
@@ -18,8 +19,24 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.lib.events import recent
+from app.tools.job_hunt_tool import JOB_DB, build_cover_letter
 
 MEMORY_DIR = os.getenv("MEMORY_DIR", "memory")
+
+
+def _load_jobs() -> list:
+    try:
+        return json.loads(JOB_DB.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _load_profile() -> dict:
+    try:
+        with open(os.path.join(MEMORY_DIR, "profile.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
 
 app = FastAPI(title="Chief Ops Console", docs_url=None, redoc_url=None)
 _security = HTTPBasic()
@@ -141,6 +158,20 @@ def api_state(_: bool = Depends(auth)):
     return JSONResponse(build_state())
 
 
+@app.get("/api/jobs")
+def api_jobs(_: bool = Depends(auth)):
+    jobs = _load_jobs()
+    return JSONResponse({"total": len(jobs), "jobs": list(reversed(jobs))})  # terbaru dulu
+
+
+@app.get("/api/cover_letter/{job_id}")
+def api_cover_letter(job_id: int, _: bool = Depends(auth)):
+    job = next((j for j in _load_jobs() if j.get("id") == job_id), None)
+    if job is None:
+        raise HTTPException(404, "Lowongan gak ketemu")
+    return JSONResponse({"text": build_cover_letter(job, _load_profile())})
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(_: bool = Depends(auth)):
     return HTMLResponse(PAGE)
@@ -207,6 +238,15 @@ tailwind.config = { theme: { extend: {
     </div>
   </header>
 
+  <!-- Tabs -->
+  <nav class="flex gap-1 mt-5 border-b border-line" id="tabs">
+    <button data-tab="ops" class="tab px-4 py-2 text-sm font-display font-600 border-b-2 border-mint text-txt">Ops</button>
+    <button data-tab="jobs" class="tab px-4 py-2 text-sm font-display font-600 border-b-2 border-transparent text-muted">Lowongan</button>
+  </nav>
+
+  <!-- View: Ops -->
+  <div id="view-ops">
+
   <!-- Health stat tiles -->
   <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5" id="tiles"></section>
   <div id="errbar" class="hidden mt-3 rounded-lg border border-coral/40 bg-coral/10 px-4 py-2.5 text-sm text-coral font-mono"></div>
@@ -239,6 +279,18 @@ tailwind.config = { theme: { extend: {
         </div>
         <div id="chat" class="p-3 space-y-2 max-h-[34vh] overflow-y-auto"></div>
       </div>
+    </div>
+  </div>
+  </div><!-- /view-ops -->
+
+  <!-- View: Lowongan -->
+  <div id="view-jobs" class="hidden mt-4">
+    <div class="rounded-xl bg-surface border border-line">
+      <div class="px-4 py-3 border-b border-line">
+        <h2 class="font-display font-600 text-sm tracking-tight">Lowongan tersimpan</h2>
+        <p class="text-[11px] text-muted mt-0.5" id="jobcount">memuat…</p>
+      </div>
+      <div id="jobs" class="p-3 space-y-2 max-h-[70vh] overflow-y-auto"></div>
     </div>
   </div>
 
@@ -332,6 +384,57 @@ function render(s){
   }).join('') : '<div class="text-muted text-sm px-2 py-4 text-center">Belum ada obrolan.</div>';
   chat.scrollTop = chat.scrollHeight;
 }
+
+// ---- Lowongan ----
+function jobCard(j){
+  const applied = j.status==='applied';
+  const url = j.url || ('https://www.google.com/search?q='+encodeURIComponent(j.title)+'+apply');
+  return `<div class="rounded-lg bg-surface2/60 border border-line px-3 py-2.5">
+    <div class="flex items-start gap-3">
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-600 break-words">${esc(j.title)} ${applied?'<span class="text-[10px] text-mint font-mono">✓ APPLIED</span>':''}</div>
+        <div class="text-[12px] text-muted mt-0.5">${esc(j.company)||'—'} · ${esc(j.location)||'Remote'}</div>
+      </div>
+      <div class="flex flex-col items-end gap-1 shrink-0">
+        <a href="${esc(url)}" target="_blank" rel="noopener" class="text-[11px] font-mono text-azure hover:underline">apply ↗</a>
+        <button onclick="toggleCover(${j.id}, this)" class="text-[11px] font-mono text-mint hover:underline">cover letter</button>
+      </div>
+    </div>
+    <pre id="cl-${j.id}" class="hidden mt-2 p-3 rounded-lg bg-ink border border-line text-[12px] text-txt font-mono whitespace-pre-wrap overflow-x-auto"></pre>
+  </div>`;
+}
+async function loadJobs(){
+  try{
+    const r = await fetch('/api/jobs',{cache:'no-store'}); if(!r.ok) return;
+    const d = await r.json();
+    document.getElementById('jobcount').textContent = d.total+' lowongan tersimpan · scraper jalan tiap 6 jam';
+    const box = document.getElementById('jobs');
+    box.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('')
+      : '<div class="text-muted text-sm px-2 py-6 text-center">Belum ada lowongan.</div>';
+  }catch(e){}
+}
+async function toggleCover(id, btn){
+  const pre = document.getElementById('cl-'+id);
+  if(!pre.classList.contains('hidden')){ pre.classList.add('hidden'); return; }
+  pre.classList.remove('hidden');
+  if(pre.dataset.loaded) return;
+  pre.textContent = 'memuat…';
+  try{
+    const r = await fetch('/api/cover_letter/'+id,{cache:'no-store'});
+    pre.textContent = r.ok ? (await r.json()).text : 'gagal memuat';
+    if(r.ok) pre.dataset.loaded = '1';
+  }catch(e){ pre.textContent = 'gagal memuat'; }
+}
+document.querySelectorAll('#tabs .tab').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.tab;
+  document.querySelectorAll('#tabs .tab').forEach(x=>{
+    const on = x.dataset.tab===t;
+    x.className='tab px-4 py-2 text-sm font-display font-600 border-b-2 '+(on?'border-mint text-txt':'border-transparent text-muted');
+  });
+  document.getElementById('view-ops').classList.toggle('hidden', t!=='ops');
+  document.getElementById('view-jobs').classList.toggle('hidden', t!=='jobs');
+  if(t==='jobs') loadJobs();
+}));
 
 async function tick(){
   try{ const r=await fetch('/api/state',{cache:'no-store'}); if(r.ok) render(await r.json()); }

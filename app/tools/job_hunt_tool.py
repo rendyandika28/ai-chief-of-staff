@@ -1,8 +1,11 @@
-"""Job search — scrapes Google Jobs, ranks by CV match, generates cover letters."""
+"""Job search — aggregates free remote-job APIs, ranks by CV match, cover letters."""
 
 import json
+import os
+import re
 import urllib.request
 import urllib.error
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -17,8 +20,53 @@ PLATFORMS = {
     "wellfound": "https://wellfound.com/jobs?keywords={role}&location={loc}",
 }
 
-JOB_DB = Path("data/jobs.json")
-JOB_DB.parent.mkdir(parents=True, exist_ok=True)
+# jobs.json lives in MEMORY_DIR so the read-only dashboard container (which mounts
+# that folder) can serve it. Old data/jobs.json is abandoned — it was polluted with
+# non-frontend false positives from the previous over-loose title filter.
+JOB_DB = Path(os.getenv("MEMORY_DIR", "memory")) / "jobs.json"
+
+# Judul diterima kalau ngandung salah satu sinyal frontend ini — dari stack CV Rendy
+# (React/Vue/Next/Nuxt/TS). Sengaja TANPA "javascript"/"typescript" telanjang (terlalu
+# generik → nyerep QA/backend) dan TANPA "fullstack" (role fullstack ≠ dominan frontend).
+_FRONTEND_SYNS = (
+    "front", "react", "vue", "next", "nuxt", "angular", "svelte", "tailwind",
+    "ui engineer", "ui developer", "web developer",
+)
+# Judul yg nyebut stack backend = didominasi backend / fullstack berat → dibuang walau
+# ada React-nya. \bjava\b gak kena "javascript" (ada boundary). "back end" dari hyphen-normalize.
+_BACKEND_RE = re.compile(
+    r"c#|c\+\+|\.net|\b(?:node(?:js)?|java|python|php|ruby|rails|laravel|django|"
+    r"spring|elixir|golang|kotlin|scala|back\s?end)\b"
+)
+# Tag pencarian Jobicy — lebih luas dari filter judul (surface banyak kandidat);
+# hasilnya tetap disaring sinyal frontend + blocklist backend di atas.
+_JOBICY_TAGS = ("frontend", "react", "vue", "javascript", "typescript")
+_GENERIC_WORDS = {"engineer", "developer", "senior", "junior", "staff", "lead", "the", "and", "remote"}
+
+
+def _frontend_dominant(title_norm: str, keys: set) -> bool:
+    """title_norm = judul lowercase, hyphen→spasi. True kalau ada sinyal frontend DAN
+    gak nyebut stack backend (menyingkirkan fullstack yg berat backend)."""
+    return any(k in title_norm for k in keys) and not _BACKEND_RE.search(title_norm)
+
+
+def build_cover_letter(job: dict, profile: dict) -> str:
+    """Static template letter from profile data — no LLM, zero cost. Shared by the
+    Telegram report and the dashboard so the wording stays in one place."""
+    contact = profile.get("contact", {})
+    summary = (profile.get("summary") or "")[:100]
+    company = f" at {job['company']}" if job.get("company") else ""
+    return (
+        f"Dear Hiring Manager,\n\n"
+        f"I'm writing to apply for the {job.get('title', 'the')} position{company}. "
+        f"With 5+ years as Frontend Engineer (React, Vue, Next.js, TypeScript), "
+        f"I've built production apps across edtech, banking, e-commerce, and digital identity. "
+        f"I'm seeking a remote contract/freelance arrangement. {summary}\n\n"
+        f"Portfolio: {contact.get('website', '')}\n"
+        f"LinkedIn: {contact.get('linkedin', '')}\n\n"
+        f"Best regards,\n{contact.get('full_name', 'Rendy Andika')}\n"
+        f"{contact.get('email', '')} | {contact.get('phone', '')}\n"
+    )
 
 
 class JobHuntTool:
@@ -98,59 +146,119 @@ class JobHuntTool:
             j["scraped_at"] = now.isoformat()
         self._save_jobs(new_jobs)
 
-        contact = self._profile.contact() if self._profile else {}
-        summary = self._profile.raw().get("summary", "")[:200] if self._profile else ""
-
-        prefs = self._profile.raw().get("job_preferences", {}) if self._profile else {}
-        pref_notes = prefs.get("notes", "")
+        profile = self._profile.raw() if self._profile else {}
 
         lines = [f"🔔 TOP {len(top)} lowongan '{role}' di {location}:\n"]
         for j in top:
             jurl = j.get("url") or f"https://www.google.com/search?q={urllib.request.quote(j['title'])}+apply"
-            contract_note = " (Prefer contract/freelance remote — no BPJS)" if pref_notes else ""
             lines.append(
                 f"{'─'*40}\n"
                 f"📌 {j['title']}" + (f" — {j['company']}" if j.get('company') else "") + "\n"
                 f"   {j.get('location','Remote')} | Score: {j['score']} | ID: [{j.get('id','?')}]\n"
-                f"   URL: {jurl}{contract_note}\n\n"
-                f"📝 Cover Letter:\n"
-                f"Dear Hiring Manager,\n\n"
-                f"I'm writing to apply for the {j['title']} position. "
-                f"With 5+ years as Frontend Engineer (React, Vue, Next.js, TypeScript), "
-                f"I've built production apps across edtech, banking, e-commerce, and digital identity. "
-                f"I'm seeking a remote contract/freelance arrangement. "
-                f"{summary[:100]}\n\n"
-                f"Portfolio: {contact.get('website','')}\n"
-                f"LinkedIn: {contact.get('linkedin','')}\n\n"
-                f"Best regards,\n{contact.get('full_name','Rendy Andika')}\n"
-                f"{contact.get('email','')} | {contact.get('phone','')}\n"
+                f"   URL: {jurl}\n\n"
+                f"📝 Cover Letter:\n" + build_cover_letter(j, profile)
             )
         lines.append("Ketik 'mark_applied:<id>' setelah apply biar gak duplikat.")
         return "\n".join(lines)
 
     def _fetch_jobs(self, role: str, location: str) -> list:
-        # Remotive API — remote-only, gratis, no key, data terstruktur (bukan scraping).
-        url = "https://remotive.com/api/remote-jobs?search=" + urllib.request.quote(role)
+        """Aggregate several free, no-key remote-job APIs. Remote-only, structured
+        data (not HTML scraping). Merge, filter to role-relevant titles, dedup."""
+        role_l = role.lower().replace("-", " ")
+        primary = next((w for w in role_l.split() if w not in _GENERIC_WORDS and len(w) > 2), role_l)
+        # accepted keywords: distinctive words from the role + frontend synonyms
+        keys = {w for w in role_l.split() if w not in _GENERIC_WORDS and len(w) > 2} | set(_FRONTEND_SYNS)
+
+        seen, out = set(), []
+        for fetch in (self._from_remotive, self._from_remoteok, self._from_arbeitnow,
+                      self._from_jobicy, self._from_wwr):
+            try:
+                for j in fetch(primary):
+                    title = (j.get("title") or "").strip()
+                    if not title:
+                        continue
+                    tl = title.lower().replace("-", " ")
+                    if not _frontend_dominant(tl, keys):
+                        continue
+                    dedup = (j.get("url") or "").strip().lower() or tl
+                    if dedup in seen:
+                        continue
+                    seen.add(dedup)
+                    out.append({
+                        "title": title,
+                        "company": (j.get("company") or "").strip(),
+                        "location": j.get("location") or "Remote",
+                        "url": (j.get("url") or "").strip(),
+                    })
+            except Exception:
+                continue  # satu sumber down != gagal total
+        return out[:40]
+
+    @staticmethod
+    def _get(url: str):
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=20) as r:
-            data = json.loads(r.read())
+            return json.loads(r.read())
 
-        # Search Remotive longgar (bisa nyasar) — filter judul harus mengandung kata kunci role.
-        words = [w for w in role.lower().split() if len(w) > 3]
+    def _from_remotive(self, keyword: str) -> list:
+        data = self._get("https://remotive.com/api/remote-jobs?search=" + urllib.request.quote(keyword))
+        return [
+            {"title": j.get("title"), "company": j.get("company_name"),
+             "location": j.get("candidate_required_location") or "Remote", "url": j.get("url")}
+            for j in data.get("jobs", [])
+        ]
+
+    def _from_remoteok(self, keyword: str) -> list:
+        # returns ~100 latest across all roles; first element is metadata. Filter happens upstream.
+        data = self._get("https://remoteok.com/api")
+        return [
+            {"title": j.get("position"), "company": j.get("company"),
+             "location": j.get("location") or "Remote", "url": j.get("url")}
+            for j in data if isinstance(j, dict) and j.get("position")
+        ]
+
+    def _from_arbeitnow(self, keyword: str) -> list:
+        data = self._get("https://www.arbeitnow.com/api/job-board-api")
+        return [
+            {"title": j.get("title"), "company": j.get("company_name"),
+             "location": j.get("location") or "Remote", "url": j.get("url")}
+            for j in data.get("data", []) if j.get("remote")
+        ]
+
+    def _from_jobicy(self, keyword: str) -> list:
+        # Loop beberapa tag stack (react/vue/ts/…) — tag = vocabulary tetap Jobicy.
+        # Dedup lintas-tag ditangani _fetch_jobs. keyword diabaikan (tag CV-based).
+        out = []
+        for tag in _JOBICY_TAGS:
+            try:
+                data = self._get("https://jobicy.com/api/v2/remote-jobs?count=50&tag=" + tag)
+            except Exception:
+                continue
+            out.extend(
+                {"title": j.get("jobTitle"), "company": j.get("companyName"),
+                 "location": j.get("jobGeo") or "Remote", "url": j.get("url")}
+                for j in data.get("jobs", [])
+            )
+        return out
+
+    def _from_wwr(self, keyword: str) -> list:
+        # WeWorkRemotely = RSS, bukan JSON. Judul formatnya "Company: Job Title".
+        req = urllib.request.Request(
+            "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            root = ET.fromstring(r.read())
         jobs = []
-        for j in data.get("jobs", []):
-            title = (j.get("title") or "").strip()
-            if not title:
-                continue
-            if words and not any(w in title.lower() for w in words):
-                continue
+        for item in root.iter("item"):
+            raw_title = (item.findtext("title") or "").strip()
+            company, sep, title = raw_title.partition(": ")
             jobs.append({
-                "title": title,
-                "company": (j.get("company_name") or "").strip(),
-                "location": j.get("candidate_required_location") or "Remote",
-                "url": j.get("url", ""),
+                "title": title if sep else raw_title,
+                "company": company if sep else "",
+                "location": item.findtext("region") or "Remote",
+                "url": item.findtext("link"),
             })
-        return jobs[:20]
+        return jobs
 
     def _load_jobs(self) -> list:
         if not JOB_DB.exists():
@@ -161,6 +269,7 @@ class JobHuntTool:
             return []
 
     def _save_jobs(self, jobs: list):
+        JOB_DB.parent.mkdir(parents=True, exist_ok=True)
         existing = self._load_jobs()
         existing_titles = {j.get("title", "").lower() for j in existing}
         next_id = len(existing)
@@ -214,3 +323,36 @@ class JobHuntTool:
             status = " ✓" if j.get("status") == "applied" else ""
             lines.append(f"  [{j['id']}] {j['title']}{status}")
         return "\n".join(lines)
+
+
+def _demo():
+    """Self-check filter dominan-frontend. `python -m app.tools.job_hunt_tool`."""
+    keys = set(_FRONTEND_SYNS)
+    n = lambda s: s.lower().replace("-", " ")
+    keep = [
+        "Frontend Engineer React and AWS",
+        "Senior React Native Developer",
+        "Front-End Developer",
+        "Frontend Web Developer React/Typescript (Remote)",
+        "Senior Frontend Software Engineer, Home Experience",
+    ]
+    drop = [
+        "Senior Fullstack Engineer (Java / React)",       # java
+        "Full-Stack Node.js and React Engineer",          # node
+        "Senior Full-Stack Engineer (.NET/Angular)",      # .net
+        "PHP Web Developer",                              # php
+        "Laravel & React Engineer",                       # laravel
+        "Software Engineer II, Full-Stack (Marketplace)", # no FE signal
+        "Software Developer in Test (JavaScript)",        # QA, no FE signal
+    ]
+    for t in keep:
+        assert _frontend_dominant(n(t), keys), f"harusnya KEEP: {t}"
+    for t in drop:
+        assert not _frontend_dominant(n(t), keys), f"harusnya DROP: {t}"
+    # 'java' jangan kena 'javascript'
+    assert _BACKEND_RE.search("java engineer") and not _BACKEND_RE.search("react javascript dev")
+    print("OK: frontend-dominant filter", len(keep), "keep /", len(drop), "drop")
+
+
+if __name__ == "__main__":
+    _demo()
