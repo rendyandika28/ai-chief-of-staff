@@ -402,6 +402,7 @@ function jobCard(j){
       <div class="min-w-0 flex-1">
         <div class="text-sm font-600 break-words">${esc(j.title)} ${applied?'<span class="text-[10px] text-mint font-mono">✓ APPLIED</span>':''}</div>
         <div class="text-[12px] text-muted mt-0.5">${esc(j.company)||'—'} · ${esc(j.location)||'Remote'}</div>
+        ${j.source?`<span class="inline-block mt-1 px-1.5 py-0.5 rounded bg-azure/15 text-azure font-mono text-[10px] tracking-wide">via ${esc(j.source)}</span>`:''}
       </div>
       <div class="flex flex-col items-end gap-1 shrink-0">
         <a href="${esc(url)}" target="_blank" rel="noopener" class="text-[11px] font-mono text-azure hover:underline">apply ↗</a>

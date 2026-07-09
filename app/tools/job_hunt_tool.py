@@ -72,6 +72,17 @@ _STRONG_TITLE = ("frontend", "front end", "react", "vue", "angular", "svelte",
 _JUNIOR_RE = re.compile(r"\b(junior|intern(ship)?|graduate|trainee|entry.level)\b")
 
 
+_SOURCES = {
+    "remotive.com": "Remotive", "remoteok.com": "RemoteOK", "arbeitnow.com": "Arbeitnow",
+    "jobicy.com": "Jobicy", "weworkremotely.com": "WeWorkRemotely", "linkedin.com": "LinkedIn",
+}
+
+
+def _source_from_url(url: str) -> str:
+    u = (url or "").lower()
+    return next((name for dom, name in _SOURCES.items() if dom in u), "?")
+
+
 def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]+>", " ", s or "")
 
@@ -238,11 +249,13 @@ class JobHuntTool:
                     if dedup in seen:
                         continue
                     seen.add(dedup)
+                    jurl = (j.get("url") or "").strip()
                     out.append({
                         "title": title,
                         "company": _fix_mojibake((j.get("company") or "").strip()),
                         "location": _fix_mojibake(j.get("location") or "Remote"),
-                        "url": (j.get("url") or "").strip(),
+                        "url": jurl,
+                        "source": _source_from_url(jurl),
                         "description": j.get("description") or "",  # transient, buat scoring — gak disimpen
                     })
             except Exception:
@@ -392,7 +405,8 @@ class JobHuntTool:
             existing.append({
                 "id": next_id, "title": title,
                 "company": job.get("company", ""), "location": job.get("location", ""),
-                "url": job.get("url", ""), "scraped_at": job.get("scraped_at", ""),
+                "url": job.get("url", ""), "source": job.get("source", ""),
+                "scraped_at": job.get("scraped_at", ""),
                 "score": job.get("score", 0), "status": job.get("status", ""),
             })
             existing_titles.add(title.lower())  # dedup dalam batch yg sama juga
