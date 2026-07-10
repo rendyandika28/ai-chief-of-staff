@@ -263,22 +263,30 @@ class TelegramBot:
         except OSError:
             pass
 
+    @staticmethod
+    def _rsvp_buttons(token: str) -> list:
+        return [
+            {"text": "✅ Yes", "callback_data": f"rsvp:{token}:accepted"},
+            {"text": "❌ No", "callback_data": f"rsvp:{token}:declined"},
+            {"text": "🤔 Maybe", "callback_data": f"rsvp:{token}:tentative"},
+        ]
+
     def send_invite(self, payload: dict) -> bool:
         """Kirim kartu undangan + tombol RSVP. Return True kalau kekirim.
         Dipanggil dari thread watcher (calendar_watcher)."""
         token = secrets.token_urlsafe(4)
-        keyboard = {"inline_keyboard": [[
-            {"text": "✅ Yes", "callback_data": f"rsvp:{token}:accepted"},
-            {"text": "❌ No", "callback_data": f"rsvp:{token}:declined"},
-            {"text": "🤔 Maybe", "callback_data": f"rsvp:{token}:tentative"},
-        ]]}
+        keyboard = {"inline_keyboard": [self._rsvp_buttons(token)]}
         message_id = self._send_to_user(payload["text"], reply_markup=keyboard)
         if message_id is None:
             return False
         self._pending_rsvp[token] = {
             "label": payload["label"], "event_id": payload["event_id"],
             "chat_id": int(self._user_id), "message_id": message_id,
+            "text": payload["text"],  # base card, buat rebuild pas ganti jawaban
         }
+        # ponytail: token gak pernah dipop (biar bisa ganti jawaban) → cap 100 biar file gak numpuk
+        while len(self._pending_rsvp) > 100:
+            self._pending_rsvp.pop(next(iter(self._pending_rsvp)))
         self._save_pending()
         self.memory.add(self._user_id, "assistant", payload["text"])
         log_event("invite", payload["text"][:120])
@@ -312,12 +320,18 @@ class TelegramBot:
             await q.answer("Gagal update ke Google, coba lagi", show_alert=True)
             return
         await q.answer(f"RSVP: {RSVP_LABEL[status]}")
+        # Rebuild dari base card + tombol tetep aktif → bisa ganti jawaban kapan aja.
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        base = info.get("text") or q.message.text
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton(b["text"], callback_data=b["callback_data"])
+            for b in self._rsvp_buttons(token)
+        ]])
         try:
-            await q.edit_message_text(f"{q.message.text}\n\n— Lo jawab: {RSVP_LABEL[status]}")
+            await q.edit_message_text(
+                f"{base}\n\n— Lo jawab: {RSVP_LABEL[status]}", reply_markup=markup)
         except Exception:
-            pass
-        self._pending_rsvp.pop(token, None)
-        self._save_pending()
+            pass  # "message not modified" kalau klik status yg sama — aman
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
