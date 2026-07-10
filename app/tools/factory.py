@@ -30,7 +30,23 @@ class RememberTool:
         return "(noted)"
 
 
-def load_tools(scheduler=None, profile=None, knowledge_graph=None, llm=None) -> dict:
+class LoopDoneTool:
+    name = "loop_done"
+    description = (
+        "Tandain satu open-loop (komitmen/tugas Rendy) udah kelar. "
+        "Panggil pas Rendy bilang suatu hal udah selesai/beres/dikerjain. "
+        "Input: kata kunci hal yang kelar — contoh: proposal klien"
+    )
+
+    def __init__(self, open_loops):
+        self._ol = open_loops
+
+    def run(self, input: str = "", user_id: str = "") -> str:
+        return self._ol.mark_done(user_id, input or "")
+
+
+def load_tools(scheduler=None, profile=None, knowledge_graph=None, llm=None,
+               open_loops=None) -> dict:
     tools = {
         "time": TimeTool(),
         "weather": WeatherTool(),
@@ -45,4 +61,6 @@ def load_tools(scheduler=None, profile=None, knowledge_graph=None, llm=None) -> 
         tools["reminder"] = ReminderTool(scheduler)
     if knowledge_graph:
         tools["remember"] = RememberTool(knowledge_graph)
+    if open_loops:
+        tools["loop_done"] = LoopDoneTool(open_loops)
     return tools

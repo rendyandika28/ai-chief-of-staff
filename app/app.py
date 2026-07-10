@@ -12,6 +12,8 @@ from app.agent.scheduler import Scheduler
 from app.memory.long_term import LongTermMemory
 from app.os.knowledge_graph import KnowledgeGraph
 from app.agent.watcher import WatcherManager
+from app.agent.open_loops import OpenLoops
+from app.agent.consolidate import MemoryConsolidator
 from app.llm.anthropic import ClaudeLLM
 
 WIB = timezone(timedelta(hours=7))
@@ -30,13 +32,20 @@ def create_core():
     long_term = LongTermMemory()
     scheduler = Scheduler()
     knowledge_graph = KnowledgeGraph()
+    open_loops = OpenLoops(fast_llm)
 
-    agent = Agent(llm, memory, scheduler, long_term, knowledge_graph, fast_llm=fast_llm)
+    agent = Agent(llm, memory, scheduler, long_term, knowledge_graph,
+                  fast_llm=fast_llm, open_loops=open_loops)
 
     watchers = WatcherManager()
 
     # Forget stale facts daily so the knowledge graph doesn't grow forever.
     watchers.register(lambda: knowledge_graph.cleanup(), 86400)
+
+    # Compact raw chat >30 hari jadi ringkasan long-term, buang mentahnya.
+    # Bikin conversations.db bounded tanpa ilang memory. Return diabaikan (gak push).
+    consolidator = MemoryConsolidator(memory, long_term, fast_llm)
+    watchers.register(lambda: (consolidator.run(USER_ID), None)[1], 86400)
 
     # Signal-based proactivity: if a project/deadline the user mentioned has gone
     # quiet, nudge with an LLM-phrased line (persona). Max 2/day, min 4h apart.
@@ -74,6 +83,22 @@ def create_core():
         return None
 
     watchers.register(job_scraper, 21600)  # every 6 hours
+
+    # Open-loop deadline ping — sentil sekali pas komitmen Rendy mepet deadline.
+    def deadline_ping():
+        now = datetime.now(WIB)
+        if not (9 <= now.hour <= 21):  # jam melek aja
+            return None
+        open_loops.expire_stale(USER_ID)  # sekalian bersihin yang basi
+        loops = open_loops.due_soon(USER_ID)  # nge-stamp: tiap loop ping sekali
+        if not loops:
+            return None
+        return agent.phrase(
+            "Sentil Rendy soal deadline yang mepet ini, santai & ringkas, "
+            "kayak temen yang inget. Jangan template:\n- " + "\n- ".join(loops)
+        )
+
+    watchers.register(deadline_ping, 3600)  # tiap 1 jam
 
     # Kalender — notify meeting bentar lagi (esp. gmeet) + undangan baru yg belum di-RSVP.
     def calendar_watcher():
@@ -152,6 +177,9 @@ def create_core():
         reminders = scheduler.due_today(USER_ID)
         if reminders:
             parts.append("Reminder hari ini: " + "; ".join(reminders))
+        loops = open_loops.agenda(USER_ID)
+        if loops:
+            parts.append("Open loop (belum kelar): " + "; ".join(loops))
         stale = _find_stale_topic(knowledge_graph, datetime.now(WIB))
         if stale:
             parts.append(f"Topik yang lama gak dibahas: {stale['predicate'].replace('_', ' ')} {stale['object']}")

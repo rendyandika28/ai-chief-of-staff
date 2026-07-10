@@ -19,14 +19,17 @@ class Agent:
     """Memory → context → one Claude call (native tools, in-persona) → stream."""
 
     def __init__(self, llm, memory, scheduler=None,
-                 long_term_memory=None, knowledge_graph=None, fast_llm=None):
+                 long_term_memory=None, knowledge_graph=None, fast_llm=None,
+                 open_loops=None):
         self.llm = llm
         self.fast_llm = fast_llm or llm  # cheap model for proactive one-liners
         self.memory = memory
         self.long_term = long_term_memory
         self.knowledge_graph = knowledge_graph
+        self.open_loops = open_loops
         self.profile = Profile()
-        self.tools = load_tools(scheduler, self.profile, knowledge_graph, self.fast_llm)
+        self.tools = load_tools(scheduler, self.profile, knowledge_graph,
+                                self.fast_llm, open_loops)
         # Static prefix (persona + profile) — identical every turn, so cached.
         self._static_prompt = (
             Path("prompts/system.md").read_text(encoding="utf-8")
@@ -111,6 +114,8 @@ class Agent:
 
         if self.long_term:
             self.long_term.add(user_id, message, full_text)
+        if self.open_loops:
+            self.open_loops.ingest(user_id, message)  # best-effort, never raises
 
     def _system_blocks(self, user_id: str, message: str) -> list:
         """Two system blocks: cached static prefix + small dynamic tail."""
