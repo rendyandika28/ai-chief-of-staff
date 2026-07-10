@@ -3,6 +3,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import tempfile
 import threading
 import time
@@ -10,10 +11,14 @@ import urllib.request
 
 from telegram import Update, InputMediaPhoto
 from telegram.constants import ChatAction
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram.ext import (Application, MessageHandler, CommandHandler,
+                          CallbackQueryHandler, filters, ContextTypes)
 
 from app.config.settings import settings
 from app.lib.events import log_event
+
+RSVP_STORE = "data/rsvp_pending.json"
+RSVP_LABEL = {"accepted": "✅ Yes", "declined": "❌ No", "tentative": "🤔 Maybe"}
 
 
 class TelegramBot:
@@ -24,6 +29,7 @@ class TelegramBot:
         self._watchers = watchers
         self._app = None
         self._user_id = "507090539"  # ponytail: hardcoded biar notifikasi jalan walau belum ada chat masuk
+        self._pending_rsvp = self._load_pending()  # token -> {label, event_id, chat_id, message_id}
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._process(update, str(update.message.from_user.id), update.message.text)
@@ -223,17 +229,95 @@ class TelegramBot:
         ) or f"⏰ Eh bro, {message.lower()}! Jangan lupa ya 😄"
         self.send_proactive(text)
 
-    def _send_to_user(self, text: str):
-        if self._app is None or self._user_id is None:
-            return
+    def _send_to_user(self, text: str, reply_markup: dict = None):
+        """Kirim pesan proaktif via raw API (jalan dari thread watcher, bukan async).
+        Return message_id kalau sukses, None kalau gagal."""
+        if self._user_id is None:
+            return None
         try:
             token = settings.TELEGRAM_BOT_TOKEN
             url = f"https://api.telegram.org/bot{token}/sendMessage"
-            data = json.dumps({"chat_id": int(self._user_id), "text": text}).encode()
+            body = {"chat_id": int(self._user_id), "text": text}
+            if reply_markup:
+                body["reply_markup"] = reply_markup
+            data = json.dumps(body).encode()
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=10)
+            resp = json.loads(urllib.request.urlopen(req, timeout=10).read())
+            return resp.get("result", {}).get("message_id")
+        except Exception:
+            return None
+
+    # ---- RSVP invites ------------------------------------------------------
+    def _load_pending(self) -> dict:
+        try:
+            with open(RSVP_STORE) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _save_pending(self):
+        try:
+            os.makedirs(os.path.dirname(RSVP_STORE), exist_ok=True)
+            with open(RSVP_STORE, "w") as f:
+                json.dump(self._pending_rsvp, f)
+        except OSError:
+            pass
+
+    def send_invite(self, payload: dict) -> bool:
+        """Kirim kartu undangan + tombol RSVP. Return True kalau kekirim.
+        Dipanggil dari thread watcher (calendar_watcher)."""
+        token = secrets.token_urlsafe(4)
+        keyboard = {"inline_keyboard": [[
+            {"text": "✅ Yes", "callback_data": f"rsvp:{token}:accepted"},
+            {"text": "❌ No", "callback_data": f"rsvp:{token}:declined"},
+            {"text": "🤔 Maybe", "callback_data": f"rsvp:{token}:tentative"},
+        ]]}
+        message_id = self._send_to_user(payload["text"], reply_markup=keyboard)
+        if message_id is None:
+            return False
+        self._pending_rsvp[token] = {
+            "label": payload["label"], "event_id": payload["event_id"],
+            "chat_id": int(self._user_id), "message_id": message_id,
+        }
+        self._save_pending()
+        self.memory.add(self._user_id, "assistant", payload["text"])
+        log_event("invite", payload["text"][:120])
+        return True
+
+    async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        q = update.callback_query
+        data = q.data or ""
+        if not data.startswith("rsvp:"):
+            await q.answer()
+            return
+        try:
+            _, token, status = data.split(":", 2)
+        except ValueError:
+            await q.answer()
+            return
+        info = self._pending_rsvp.get(token)
+        if not info:
+            await q.answer("Undangan udah kadaluarsa — buka di Calendar ya", show_alert=True)
+            return
+
+        from app.tools.calendar_tool import set_rsvp
+        loop = asyncio.get_running_loop()
+        try:
+            ok = await loop.run_in_executor(
+                None, set_rsvp, info["label"], info["event_id"], status)
+        except Exception:
+            ok = False
+
+        if not ok:
+            await q.answer("Gagal update ke Google, coba lagi", show_alert=True)
+            return
+        await q.answer(f"RSVP: {RSVP_LABEL[status]}")
+        try:
+            await q.edit_message_text(f"{q.message.text}\n\n— Lo jawab: {RSVP_LABEL[status]}")
         except Exception:
             pass
+        self._pending_rsvp.pop(token, None)
+        self._save_pending()
 
     async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
@@ -266,13 +350,15 @@ class TelegramBot:
         self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice))
         self._app.add_handler(CommandHandler("help", self._handle_help))
         self._app.add_handler(CommandHandler("start", self._handle_help))
+        self._app.add_handler(CallbackQueryHandler(self._handle_callback))
 
         self.scheduler._on_notify = self._on_scheduled
         self.scheduler.start()
 
         if self._watchers:
             self._watchers.on_alert = self.send_proactive
-            self._watchers.start()  # baru start thread setelah on_alert kesambung
+            self._watchers.on_invite = self.send_invite
+            self._watchers.start()  # baru start thread setelah on_alert/on_invite kesambung
 
         print("Telegram bot running...")
         self._app.run_polling()

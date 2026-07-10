@@ -101,8 +101,11 @@ def create_core():
     watchers.register(deadline_ping, 3600)  # tiap 1 jam
 
     # Kalender — notify meeting bentar lagi (esp. gmeet) + undangan baru yg belum di-RSVP.
+    # Invite → kartu detail + tombol RSVP (lewat watchers.on_invite). Meeting soon →
+    # ping casual (lewat return/on_alert). Tiap tag di-commit HANYA setelah kekirim.
     def calendar_watcher():
-        from app.tools.calendar_tool import fetch_events, load_seen, save_seen
+        from app.tools.calendar_tool import (
+            fetch_events, load_seen, save_seen, format_invite_card)
         now = datetime.now(WIB)
         try:
             events = fetch_events(now, now + timedelta(days=7))
@@ -112,42 +115,40 @@ def create_core():
             logging.getLogger(__name__).warning(f"calendar_watcher: {e}")
             return None
 
-        seen = load_seen()
         current_ids = {e["id"] for e in events}
-        pending = {}  # event_id -> tag baru, di-commit HANYA kalau alert kekirim
-        alerts = []
+        # prune event yg udah lewat (gak ada di window 7 hari) — aman disimpen kapan pun
+        pruned = {k: v for k, v in load_seen().items() if k in current_ids}
+        soon = []  # (text, key)
+
         for e in events:
             key = e["id"]
-            # event yg sama bisa muncul di >1 akun — dedup by id (persisted + run ini)
-            done = set(seen.get(key, [])) | set(pending.get(key, []))
+            done = set(pruned.get(key, []))
             if e["timed"]:
                 mins = (e["start"] - now).total_seconds() / 60
                 if 0 <= mins <= 16 and "soon" not in done:
                     link = f" — {e['gmeet']}" if e["gmeet"] else ""
-                    alerts.append(f"{int(mins)} menit lagi: {e['summary']} [{e['label']}]{link}")
-                    pending.setdefault(key, []).append("soon")
+                    soon.append(
+                        (f"{int(mins)} menit lagi: {e['summary']} [{e['label']}]{link}", key))
+            # Undangan baru → kartu + tombol. Commit "invite" HANYA kalau kekirim.
             if e["needs_action"] and "invite" not in done:
-                when = e["start"].strftime("%a %d/%m %H:%M")
-                alerts.append(f"Undangan baru: {e['summary']} [{e['label']}] — {when}, belum di-RSVP")
-                pending.setdefault(key, []).append("invite")
+                payload = {"text": format_invite_card(e),
+                           "label": e["label"], "event_id": e["id"]}
+                if watchers.on_invite and watchers.on_invite(payload):
+                    pruned.setdefault(key, []).append("invite")
 
-        # prune event yg udah lewat (gak ada di window 7 hari) — aman disimpen kapan pun
-        pruned = {k: v for k, v in seen.items() if k in current_ids}
-        if not alerts:
-            save_seen(pruned)
+        if not soon:
+            save_seen(pruned)  # invite tags (kalau ada) tetep ke-persist
             return None
 
         msg = agent.phrase(
-            "Sampaikan ke Rendy dengan gaya lo, ringkas dan to the point:\n" + "\n".join(alerts)
+            "Sampaikan ke Rendy dengan gaya lo, ringkas dan to the point:\n"
+            + "\n".join(t for t, _ in soon)
         )
         if not msg:
-            save_seen(pruned)  # jangan commit tag baru — biar dicoba lagi tick berikutnya
+            save_seen(pruned)  # invite udah ke-commit; soon dicoba lagi tick berikutnya
             return None
-
-        # ponytail: commit tag baru begitu pesan siap. Kalau kirim ke Telegram gagal
-        # (jarang), notif itu gak diretry — cukup buat sekarang.
-        for key, new in pending.items():
-            pruned.setdefault(key, []).extend(new)
+        for _, key in soon:
+            pruned.setdefault(key, []).append("soon")
         save_seen(pruned)
         return msg
 

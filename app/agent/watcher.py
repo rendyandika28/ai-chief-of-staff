@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 class WatcherManager:
     def __init__(self, on_alert=None):
         self.on_alert = on_alert  # set later by the interface (e.g. TelegramBot)
+        self.on_invite = None     # structured invite→card+buttons sender (set by interface)
         self._running = True
         self._pending = []  # (watcher, interval) — dijalanin pas start()
 
