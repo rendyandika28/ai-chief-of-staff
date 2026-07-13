@@ -343,7 +343,6 @@ class TelegramBot:
             "- Chat natural (ngobrol biasa)\n"
             "- Weather (cuaca kota)\n"
             "- CCTV Jogja (pantau lalu lintas)\n"
-            "- Job hunt (cari lowongan multi-platform)\n"
             "- Reminder (pengingat otomatis)\n\n"
             "Commands: /help /start"
         )

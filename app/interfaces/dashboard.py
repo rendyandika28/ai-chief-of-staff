@@ -21,8 +21,9 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from app.lib.events import recent
 from app.lib.usage import today as usage_today
 from app.tools import gmail_draft
-from app.tools.job_hunt_tool import (
-    JOB_DB, STATUS_DB, MATCH_THRESHOLD, WIB, JobHuntTool, build_cover_letter, match_score,
+from app.tools.job_store import (
+    JOB_DB, STATUS_DB, MATCH_THRESHOLD, WIB, build_cover_letter, llm_rescore, match_score,
+    save_jobs,
 )
 
 MEMORY_DIR = os.getenv("MEMORY_DIR", "memory")
@@ -271,37 +272,41 @@ def api_ingest(payload: dict = Body(...), _: bool = Depends(ext_auth)):
         j["score"] = match_score(j, profile)
     llm = _fast_llm()
     if llm:
-        JobHuntTool(llm=llm)._llm_rescore(jobs, profile)  # gagal → skor heuristik bertahan
+        llm_rescore(jobs, profile, llm)  # gagal → skor heuristik bertahan
 
-    tool = JobHuntTool()
+    auto_draft = bool((payload or {}).get("auto_draft"))
     results = []
     for j in jobs:
-        desc = j.pop("description", None)
+        j.pop("description", None)  # transient, gak disimpen
         if j["score"] < MATCH_THRESHOLD:
             results.append({"url": j["url"], "stored": False, "score": j["score"], "job_id": None})
             continue
-        # per-job save biar dapet mapping url→id (dedup di dalem _save_jobs by URL)
-        saved = tool._save_jobs([j])
-        results.append({"url": j["url"], "stored": bool(saved), "score": j["score"],
-                        "job_id": saved[0] if saved else None})
-        _ = desc  # transient, gak disimpen
+        # per-job save biar dapet mapping url→id (dedup di dalem save_jobs by URL)
+        saved = save_jobs([j])
+        res = {"url": j["url"], "stored": bool(saved), "score": j["score"],
+               "job_id": saved[0] if saved else None}
+        # Auto-draft: langsung bikin Gmail draft buat yang baru kesimpen & ber-email —
+        # extension cuma kirim post ber-email (cold approach), Rendy tinggal buka Gmail.
+        if auto_draft and saved and j.get("email"):
+            draft_id, err = _draft_job(saved[0])
+            res["drafted"] = draft_id is not None
+            if err:
+                res["draft_error"] = err[1]
+        results.append(res)
     return JSONResponse({"results": results})
 
 
-@app.post("/api/drafts")
-def api_create_draft(payload: dict = Body(...), _: bool = Depends(ext_auth)):
-    """Bikin Gmail draft (cover letter + CV) buat 1 job. Semi-auto: Rendy Send manual."""
-    job_id = (payload or {}).get("job_id")
-    if not isinstance(job_id, int):
-        raise HTTPException(400, "job_id harus angka")
+def _draft_job(job_id: int) -> tuple:
+    """Bikin Gmail draft buat 1 job tersimpan. Return (draft_id, None) atau (None, (code, pesan)).
+    Dipake endpoint /api/drafts DAN auto-draft di ingest."""
     jobs = _load_jobs()
     job = next((j for j in jobs if j.get("id") == job_id), None)
     if job is None:
-        raise HTTPException(404, "lowongan gak ada")
+        return None, (404, "lowongan gak ada")
     if not job.get("email"):
-        raise HTTPException(400, "job ini gak punya email — apply manual via URL")
+        return None, (400, "job ini gak punya email — apply manual via URL")
     if _stage_of(_load_status(), job_id) == "drafted":
-        raise HTTPException(409, "udah didraft — cek folder Draft Gmail")
+        return None, (409, "udah didraft — cek folder Draft Gmail")
 
     profile = _load_profile()
     try:
@@ -312,16 +317,28 @@ def api_create_draft(payload: dict = Body(...), _: bool = Depends(ext_auth)):
             cv_path=profile.get("resume_path", ""),
         )
     except FileNotFoundError:
-        raise HTTPException(502, "token Gmail belum ada — jalanin scripts/google_auth.py pribadi gmail")
+        return None, (502, "token Gmail belum ada — jalanin scripts/google_auth.py pribadi gmail")
     except Exception as e:
-        raise HTTPException(502, f"Gmail API gagal: {e}")  # job utuh, bisa apply manual
+        return None, (502, f"Gmail API gagal: {e}")  # job utuh, bisa apply manual
 
     job["gmail_draft_id"] = draft_id
     try:
         JOB_DB.write_text(json.dumps(jobs, indent=2, ensure_ascii=False))
         _write_stage(job_id, "drafted")
     except OSError:
-        raise HTTPException(500, "draft kebuat tapi gagal nulis status — mount read-only?")
+        return None, (500, "draft kebuat tapi gagal nulis status — mount read-only?")
+    return draft_id, None
+
+
+@app.post("/api/drafts")
+def api_create_draft(payload: dict = Body(...), _: bool = Depends(ext_auth)):
+    """Bikin Gmail draft (cover letter + CV) buat 1 job. Semi-auto: Rendy Send manual."""
+    job_id = (payload or {}).get("job_id")
+    if not isinstance(job_id, int):
+        raise HTTPException(400, "job_id harus angka")
+    draft_id, err = _draft_job(job_id)
+    if err:
+        raise HTTPException(err[0], err[1])
     return JSONResponse({"ok": True, "job_id": job_id, "gmail_draft_id": draft_id})
 
 

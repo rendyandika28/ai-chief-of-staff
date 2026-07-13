@@ -56,7 +56,7 @@ Semua lewat HTTP ke FastAPI yang udah jalan. Satu DB, dua penulis (dashboard + e
 
 | Komponen | Lokasi | Tugas |
 |---|---|---|
-| Chrome extension | repo/folder baru (di luar repo agent) | scrape post+job LinkedIn, ekstrak email, push ke agent |
+| Chrome extension | folder `extension/` di repo ini | scrape post+job LinkedIn, ekstrak email, push ke agent |
 | `POST /api/jobs/ingest` | `app/interfaces/dashboard.py` | terima payload extension, skor, filter >=75, simpen |
 | `POST /api/drafts` | `app/interfaces/dashboard.py` | bikin Gmail draft buat job yang lolos |
 | `GET /api/drafts` | `app/interfaces/dashboard.py` | list draft buat dashboard |

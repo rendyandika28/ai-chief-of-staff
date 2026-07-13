@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Job Assist",
+  "version": "0.1.0",
+  "description": "Scan post & job LinkedIn, kirim ke AI chief-of-staff buat scoring + draft lamaran. Semi-auto, personal use.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://*/*", "http://localhost/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": { "default_title": "LinkedIn Job Assist" }
+}

@@ -3,7 +3,6 @@
 from app.tools.time_tool import TimeTool
 from app.tools.weather_tool import WeatherTool
 from app.tools.cctv_tool import CctvTool
-from app.tools.job_hunt_tool import JobHuntTool
 from app.tools.reminder_tool import ReminderTool
 from app.tools.news_tool import NewsTool
 from app.tools.polymarket_tool import PolymarketTool
@@ -55,7 +54,6 @@ def load_tools(scheduler=None, profile=None, knowledge_graph=None, llm=None,
         "time": TimeTool(),
         "weather": WeatherTool(),
         "cctv": CctvTool(),
-        "job_hunt": JobHuntTool(profile, llm),
         "news": NewsTool(),
         "polymarket": PolymarketTool(),
         "doc_gen": DocTool(),

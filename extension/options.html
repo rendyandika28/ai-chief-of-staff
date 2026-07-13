@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>LinkedIn Job Assist — Setup</title>
+<style>
+  body{font-family:system-ui;max-width:480px;margin:40px auto;padding:0 16px;color:#e7ecf3;background:#0b0e14}
+  label{display:block;margin:16px 0 4px;font-size:13px;color:#7c8798}
+  input{width:100%;padding:8px;border:1px solid #232b37;border-radius:6px;background:#12171f;color:#e7ecf3;box-sizing:border-box}
+  button{margin-top:20px;padding:8px 20px;border:0;border-radius:6px;background:#6ee7c7;color:#0b0e14;font-weight:600;cursor:pointer}
+  #msg{margin-left:12px;font-size:13px;color:#6ee7c7}
+</style>
+</head>
+<body>
+<h2>LinkedIn Job Assist</h2>
+<label>URL agent (dashboard)</label>
+<input id="url" placeholder="https://dash.contoh.com">
+<label>API token (EXT_API_TOKEN)</label>
+<input id="token" type="password" placeholder="token dari env server">
+<label>Umur post maksimal (jam) — post lebih tua di-skip</label>
+<input id="maxage" type="number" min="1" placeholder="24">
+<button id="save">Simpan</button><span id="msg"></span>
+<script src="options.js"></script>
+</body>
+</html>

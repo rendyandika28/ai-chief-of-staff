@@ -61,7 +61,7 @@ masuk `jobs.json`; drafts 2x → 409 kedua. TestClient/curl lokal.
 
 Verifikasi: buka dashboard lokal, klik, draft muncul di Gmail.
 
-## Task 6 — Chrome extension (folder baru, di luar repo: `~/Development/linkedin-job-assist-ext`)
+## Task 6 — Chrome extension (folder `extension/` di repo ini)
 
 MV3, tanpa framework/build step — vanilla JS, load unpacked.
 - `manifest.json`: content script @ `linkedin.com`, background service worker,

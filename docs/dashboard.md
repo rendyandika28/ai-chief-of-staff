@@ -32,7 +32,7 @@ Env:
 
 ## LinkedIn Job Assist (extension → dashboard)
 
-Chrome extension (repo `linkedin-job-assist-ext`) scan post/job LinkedIn dan push ke sini.
+Chrome extension (folder `extension/`) scan post/job LinkedIn dan push ke sini.
 Spec: `docs/superpowers/specs/2026-07-13-linkedin-job-assist-design.md`.
 
 - `POST /api/jobs/ingest` — batch dari extension. Auth: header `X-API-Token` == `EXT_API_TOKEN`

@@ -11,7 +11,9 @@ wheels/
 .env
 
 # Data
-memory/conversations.db
+memory/*.db
+memory/*.db-shm
+memory/*.db-wal
 memory/scheduler.db
 memory/long_term.db
 memory/knowledge.db

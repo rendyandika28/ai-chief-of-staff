@@ -91,20 +91,6 @@ def create_core():
 
     watchers.register(stale_topic_followup, 3600)  # check hourly, gated to once/day
 
-    # Job scraper — scrape + simpan ke jobs.json tiap 6 jam. TIDAK push ke Telegram;
-    # lowongan sekarang hidup di menu "Lowongan" dashboard (biar gak spam chat).
-    def job_scraper():
-        from app.agent.profile import Profile
-        prefs = Profile().raw().get("job_preferences", {})
-        role = prefs.get("roles", ["frontend engineer"])[0]
-        loc = prefs.get("preferred_location", "remote")
-        job_tool = agent.tools.get("job_hunt")
-        if job_tool:
-            job_tool.run(f"report:{role}|{loc}")  # simpan lowongan baru; return diabaikan
-        return None
-
-    watchers.register(job_scraper, 21600)  # every 6 hours
-
     # Open-loop deadline ping — sentil sekali pas komitmen Rendy mepet deadline.
     def deadline_ping():
         now = datetime.now(WIB)
