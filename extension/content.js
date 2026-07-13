@@ -126,14 +126,20 @@ function collectVisible() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// window.scrollTo gak ngefek di SDUI (feed scroll di container dalem, bukan window).
-// scrollIntoView ke post terakhir = nge-scroll container mana pun yang megang post itu.
+// SDUI: window gak pernah scroll (scrollY stuck 0) — scroller beneran = elemen <main>
+// (overflow-y auto). Cari ancestor scrollable dari post, dorong scrollTop-nya langsung.
+function findScrollable(el) {
+  for (let n = el; n; n = n.parentElement) {
+    if (n.scrollHeight > n.clientHeight + 300 && /(auto|scroll)/.test(getComputedStyle(n).overflowY)) return n;
+  }
+  return null;
+}
+
 function scrollFeed() {
   const posts = document.querySelectorAll(`${SEL.sduiItem}, ${SEL.post}`);
   const last = posts[posts.length - 1];
-  if (last) last.scrollIntoView({ block: "end" });
-  // fallback dokumen biasa (DOM classic)
-  (document.scrollingElement || document.documentElement).scrollTop += window.innerHeight * 3;
+  const sc = (last && findScrollable(last)) || document.querySelector("main") || document.scrollingElement;
+  if (sc) sc.scrollTop = sc.scrollHeight; // mentok bawah → trigger lazy-load batch berikut
 }
 
 async function autoScan(btn) {
