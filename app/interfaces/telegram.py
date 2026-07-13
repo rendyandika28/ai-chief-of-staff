@@ -217,9 +217,11 @@ class TelegramBot:
 
     def _on_scheduled(self, user_id: str, message: str):
         log_event("reminder", message[:120])
-        if message == "__morning_brief__":
-            build = getattr(self.scheduler, "morning_brief", None)
-            text = build() if build else None
+        # Internal brief tasks: __x__ dispatches to scheduler.x() builder
+        # (morning_brief, weekly_review, evening_brief). Builder → None = skip.
+        if message.startswith("__") and message.endswith("__"):
+            build = getattr(self.scheduler, message.strip("_"), None)
+            text = build() if callable(build) else None
             if text:
                 self.send_proactive(text)
             return

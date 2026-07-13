@@ -15,6 +15,8 @@ from app.agent.watcher import WatcherManager
 from app.agent.open_loops import OpenLoops
 from app.agent.consolidate import MemoryConsolidator
 from app.agent.extractor import MemoryExtractor
+from app.agent.proactive import (
+    find_conflicts, relevant_facts, unseen_conflicts, mark_seen)
 from app.llm.anthropic import ClaudeLLM
 from app.llm.embedder import Embedder
 
@@ -137,8 +139,12 @@ def create_core():
                 mins = (e["start"] - now).total_seconds() / 60
                 if 0 <= mins <= 16 and "soon" not in done:
                     link = f" — {e['gmeet']}" if e["gmeet"] else ""
+                    # Pre-meeting enrichment: fakta KG relevan (kalau ada).
+                    ctx = f"{e['summary']} {e.get('organizer','')} {' '.join(e.get('guests',[]))}"
+                    facts = relevant_facts(knowledge_graph, embedder, USER_ID, ctx)
+                    hint = f" (inget: {'; '.join(facts)})" if facts else ""
                     soon.append(
-                        (f"{int(mins)} menit lagi: {e['summary']} [{e['label']}]{link}", key))
+                        (f"{int(mins)} menit lagi: {e['summary']} [{e['label']}]{link}{hint}", key))
             # Undangan baru → kartu + tombol. Commit "invite" HANYA kalau kekirim.
             if e["needs_action"] and "invite" not in done:
                 payload = {"text": format_invite_card(e),
@@ -164,6 +170,36 @@ def create_core():
 
     watchers.register(calendar_watcher, 300)  # tiap 5 menit
 
+    # Conflict detector — bentrok jadwal (meeting overlap / deadline nabrak meeting).
+    # Cuma yang URGENT (≤36h) yang di-ping, sekali each (seen-store). Future
+    # conflict masuk weekly review. Satu-satunya sumber interrupt baru di v2.
+    def conflict_watcher():
+        from app.tools.calendar_tool import fetch_events
+        now = datetime.now(WIB)
+        if not (9 <= now.hour <= 21):
+            return None
+        try:
+            events = fetch_events(now, now + timedelta(hours=48))
+        except FileNotFoundError:
+            return None
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"conflict_watcher: {e}")
+            return None
+        conflicts = [c for c in find_conflicts(events, open_loops.due_items(USER_ID), now)
+                     if c["urgent"]]
+        conflicts = unseen_conflicts(conflicts, now)
+        if not conflicts:
+            return None
+        msg = agent.phrase(
+            "Kasih tau Rendy soal bentrok jadwal ini, santai & ringkas, "
+            "kayak temen yang jagain kalender. Jangan template:\n- "
+            + "\n- ".join(c["text"] for c in conflicts))
+        if msg:
+            mark_seen(conflicts)  # stamp cuma kalau berhasil di-phrase
+        return msg
+
+    watchers.register(conflict_watcher, 3600)  # tiap 1 jam
+
     # Morning brief — persistent daily task at 07:00 WIB, survives restarts.
     if not scheduler.has_pending("__morning_brief__"):
         run_at, interval = Scheduler.calc_daily("07:00")
@@ -174,7 +210,9 @@ def create_core():
         weather = agent.tools.get("weather")
         if weather:
             try:
-                parts.append(f"Cuaca: {weather.run('jakarta')}")
+                # City dari profile (bukan hardcode) — ikut kalau Rendy pindah kota.
+                city = (agent.profile.contact().get("location") or "Jakarta").split(",")[0].strip()
+                parts.append(f"Cuaca: {weather.run(city)}")
             except Exception:
                 pass
         cal = agent.tools.get("calendar")
@@ -185,6 +223,23 @@ def create_core():
                     parts.append("Agenda hari ini:\n" + agenda)
             except Exception:
                 pass
+        # Pre-meeting KG context + konflik hari ini (structured, di atas agenda teks).
+        try:
+            events = _today_events()
+            ctx_lines = []
+            for e in events:
+                ctx = f"{e['summary']} {e.get('organizer','')} {' '.join(e.get('guests',[]))}"
+                facts = relevant_facts(knowledge_graph, embedder, USER_ID, ctx)
+                if facts:
+                    ctx_lines.append(f"{e['summary']}: {'; '.join(facts)}")
+            if ctx_lines:
+                parts.append("Konteks meeting:\n" + "\n".join(ctx_lines))
+            clashes = [c["text"] for c in find_conflicts(
+                events, open_loops.due_items(USER_ID), datetime.now(WIB))]
+            if clashes:
+                parts.append("Perhatiin bentrok:\n- " + "\n- ".join(clashes))
+        except Exception:
+            pass
         reminders = scheduler.due_today(USER_ID)
         if reminders:
             parts.append("Reminder hari ini: " + "; ".join(reminders))
@@ -200,6 +255,77 @@ def create_core():
         )
 
     scheduler.morning_brief = morning_brief
+
+    def _window_events(start, end):
+        """Timed calendar events in [start, end]. [] on no account / error."""
+        from app.tools.calendar_tool import fetch_events
+        try:
+            return [e for e in fetch_events(start, end) if e.get("timed")]
+        except Exception:
+            return []
+
+    def _today_events():
+        now = datetime.now(WIB)
+        return _window_events(now, now.replace(hour=23, minute=59))
+
+    # Weekly review — Minggu 19:00 WIB. Reflektif: kelar minggu ini, masih
+    # nganggur, topik kesentuh, minggu depan + bentrok. Nol interrupt.
+    if not scheduler.has_pending("__weekly_review__"):
+        run_at, interval = Scheduler.calc_weekly("minggu", "19:00")
+        scheduler.add("system", "__weekly_review__", run_at=run_at, interval_seconds=interval)
+
+    def weekly_review():
+        now = datetime.now(WIB)
+        parts = []
+        done = open_loops.closed_since(USER_ID, (now - timedelta(days=7)).isoformat())
+        if done:
+            parts.append("Kelar minggu ini: " + "; ".join(done))
+        openloops = open_loops.agenda(USER_ID)
+        if openloops:
+            parts.append("Masih nganggur: " + "; ".join(openloops))
+        # KG stores updated_at in naive local time; use naive now to match (7h
+        # tz skew is immaterial across a 7-day window).
+        touched = knowledge_graph.touched_since(
+            USER_ID, (datetime.now() - timedelta(days=7)).isoformat())
+        if touched:
+            topics = {f"{f['predicate'].replace('_', ' ')} {f['object']}" for f in touched}
+            parts.append("Yang lo pikirin minggu ini: " + "; ".join(list(topics)[:6]))
+        next_week = _window_events(now, now + timedelta(days=7))
+        clashes = [c["text"] for c in find_conflicts(
+            next_week, open_loops.due_items(USER_ID), now)]
+        if clashes:
+            parts.append("Bentrok minggu depan:\n- " + "\n- ".join(clashes))
+        if not parts:
+            return None  # minggu kosong → jangan spam
+        return agent.phrase(
+            "Bikin weekly review buat Rendy dari data ini (santai, reflektif, "
+            "3-5 kalimat), tutup dengan tawaran bantu minggu depan:\n" + "\n".join(parts))
+
+    scheduler.weekly_review = weekly_review
+
+    # Evening wind-down — harian 21:00. Retrospektif + intip besok pagi.
+    if not scheduler.has_pending("__evening_brief__"):
+        run_at, interval = Scheduler.calc_daily("21:00")
+        scheduler.add("system", "__evening_brief__", run_at=run_at, interval_seconds=interval)
+
+    def evening_brief():
+        now = datetime.now(WIB)
+        parts = []
+        done = open_loops.closed_since(USER_ID, now.replace(hour=0, minute=0).isoformat())
+        if done:
+            parts.append("Hari ini lo kelarin: " + "; ".join(done))
+        tomorrow = now.replace(hour=23, minute=59) + timedelta(minutes=1)
+        tmr_events = _window_events(tomorrow, tomorrow.replace(hour=23, minute=59))
+        if tmr_events:
+            first = tmr_events[0]
+            parts.append(f"Besok mulai: {first['summary']} jam {first['start']:%H:%M}")
+        if not (done or tmr_events):
+            return None  # ga ada yang kelar & ga ada meeting besok → diem
+        return agent.phrase(
+            "Bikin wind-down malam buat Rendy (1-2 kalimat, santai, penutup hari) "
+            "dari data ini:\n" + "\n".join(parts))
+
+    scheduler.evening_brief = evening_brief
 
     return agent, memory, scheduler, watchers
 

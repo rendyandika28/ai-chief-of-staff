@@ -2,6 +2,7 @@
 surface them at the right time. Storage = SQLite (reuse Database)."""
 
 import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from app.lib.database import Database
@@ -76,6 +77,12 @@ class OpenLoops:
                 surfaced_at TEXT
             )
         """)
+        # Migration: when a loop was closed, so weekly review can report
+        # "kelar minggu ini". Idempotent.
+        try:
+            self._db.commit_sql("ALTER TABLE loops ADD COLUMN closed_at TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     # ---- capture -----------------------------------------------------------
     def ingest(self, user_id: str, message: str):
@@ -171,8 +178,29 @@ class OpenLoops:
                 best, best_score = (loop_id, text), score
         if not best or best_score == 0:
             return "(gak nemu loop yang cocok)"
-        self._db.commit_sql("UPDATE loops SET status='done' WHERE id=?", (best[0],))
+        self._db.commit_sql(
+            "UPDATE loops SET status='done', closed_at=? WHERE id=?",
+            (datetime.now(WIB).isoformat(), best[0]))
         return f"(kelar: {best[1]})"
+
+    def due_items(self, user_id: str) -> list[dict]:
+        """Open loops with a parseable due time — for conflict detection.
+        [{"text": str, "due": aware datetime}]."""
+        out = []
+        for _, text, due_at, _s in self._open_rows(user_id):
+            due = _parse_due(due_at)
+            if due is not None:
+                out.append({"text": text, "due": due})
+        return out
+
+    def closed_since(self, user_id: str, since_iso: str) -> list[str]:
+        """Loop texts marked done (not expired) with closed_at >= since — for
+        the weekly/evening review."""
+        rows = self._db.fetch(
+            "SELECT text FROM loops WHERE user_id=? AND status='done' "
+            "AND closed_at IS NOT NULL AND closed_at >= ?",
+            (user_id, since_iso))
+        return [r[0] for r in rows]
 
     def expire_stale(self, user_id: str):
         """Open loops past due by >3 days → expired, so they don't pile up."""
@@ -239,6 +267,16 @@ def _demo():
         (u, "basi", (now - timedelta(days=4)).isoformat(), now.isoformat()))
     ol.expire_stale(u)
     assert not any(t == "basi" for _, t, _, _ in ol._open_rows(u)), "stale should expire"
+
+    # closed_since: the proposal we mark_done'd earlier is reported; expired isn't
+    week_ago = (now - timedelta(days=7)).isoformat()
+    closed = ol.closed_since(u, week_ago)
+    assert any("proposal" in c for c in closed), f"done loop should be in closed_since, got {closed}"
+    assert not any(c == "basi" for c in closed), "expired must not count as closed"
+
+    # due_items: only open loops with a parseable due, as datetimes
+    items = ol.due_items(u)
+    assert all(hasattr(it["due"], "year") for it in items), "due_items must return datetimes"
 
     print("open_loops self-check OK")
 

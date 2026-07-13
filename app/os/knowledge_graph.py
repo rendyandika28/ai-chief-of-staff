@@ -183,6 +183,45 @@ class KnowledgeGraph:
             (stale,),
         )
 
+    def relevant(self, user_id: str, qvec, query: str, k: int = 2,
+                 threshold: float = 0.65) -> list:
+        """Facts genuinely related to a context (e.g. a meeting) as formatted
+        strings. Semantic path keeps only facts with cosine >= threshold, so an
+        unrelated context yields []. Keyword fallback requires token overlap
+        (inherently filtered). Used for pre-meeting enrichment — must not force
+        noise. ponytail: threshold is a calibration knob."""
+        import numpy as np
+        if qvec is not None:
+            rows = self._db.fetch(
+                "SELECT subject, predicate, object, embedding FROM facts "
+                "WHERE user_id=? AND confidence>=0.3 AND embedding IS NOT NULL",
+                (user_id,))
+            q = np.asarray(qvec, dtype=np.float32)
+            q = q / (np.linalg.norm(q) or 1.0)
+            scored = []
+            for s, p, o, emb in rows:
+                if not emb:
+                    continue
+                v = from_blob(emb)
+                cos = float(v @ q / ((np.linalg.norm(v) or 1.0)))
+                if cos >= threshold:
+                    scored.append((cos, f"{s} {p.replace('_', ' ')} {o}"))
+            scored.sort(reverse=True)
+            return [t for _, t in scored[:k]]
+        # keyword fallback — LIKE requires overlap, so it self-filters
+        kw = self._keyword_search(user_id, query)[:k]
+        return [f"{f['subject']} {f['predicate'].replace('_', ' ')} {f['object']}" for f in kw]
+
+    def touched_since(self, user_id: str, since_iso: str) -> list:
+        """Facts updated on/after since — 'what you were thinking about lately',
+        for the weekly review. Highest-confidence first."""
+        rows = self._db.fetch(
+            "SELECT subject, predicate, object FROM facts "
+            "WHERE user_id=? AND updated_at >= ? AND confidence >= 0.3 "
+            "ORDER BY confidence DESC LIMIT 15",
+            (user_id, since_iso))
+        return [{"subject": r[0], "predicate": r[1], "object": r[2]} for r in rows]
+
     def backfill_embeddings(self, batch: int = 100):
         """One-shot: embed facts stored before the embedder was wired in.
         No-op when embedder off. Runs on startup; cheap (batched, only NULLs)."""
