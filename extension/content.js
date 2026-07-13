@@ -126,6 +126,16 @@ function collectVisible() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// window.scrollTo gak ngefek di SDUI (feed scroll di container dalem, bukan window).
+// scrollIntoView ke post terakhir = nge-scroll container mana pun yang megang post itu.
+function scrollFeed() {
+  const posts = document.querySelectorAll(`${SEL.sduiItem}, ${SEL.post}`);
+  const last = posts[posts.length - 1];
+  if (last) last.scrollIntoView({ block: "end" });
+  // fallback dokumen biasa (DOM classic)
+  (document.scrollingElement || document.documentElement).scrollTop += window.innerHeight * 3;
+}
+
 async function autoScan(btn) {
   if (autoScan.running) return;
   autoScan.running = true;
@@ -140,8 +150,8 @@ async function autoScan(btn) {
     found.forEach((f) => f.item && targets.push(f));
     idle = found.length === 0 ? idle + 1 : 0;
     btn.textContent = `⇣ scroll ${i + 1} · ${seen} post · ${targets.length} ber-email`;
-    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-    await sleep(1200 + Math.random() * 900); // jeda manusiawi, tunggu lazy-load
+    scrollFeed();
+    await sleep(1500 + Math.random() * 900); // jeda manusiawi, tunggu lazy-load
   }
 
   if (!targets.length) {

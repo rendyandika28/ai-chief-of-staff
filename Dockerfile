@@ -1,9 +1,10 @@
-# Dashboard-only image (read-only monitor). Sengaja TIDAK install deps bot
-# (anthropic/playwright/telegram) — dashboard cuma butuh fastapi + stdlib.
+# Dashboard image. Sengaja TIDAK install deps bot (anthropic/playwright/telegram) —
+# fastapi + google-api (Gmail draft lamaran via /api/drafts) doang.
 FROM python:3.12-slim
 
 WORKDIR /app
-RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.30"
+RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.30" \
+    "google-auth>=2.50.0" "google-api-python-client>=2.198.0"
 
 COPY app ./app
 
