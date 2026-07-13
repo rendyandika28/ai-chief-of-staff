@@ -19,6 +19,8 @@ from app.agent.proactive import (
     find_conflicts, relevant_facts, unseen_conflicts, mark_seen)
 from app.llm.anthropic import ClaudeLLM
 from app.llm.embedder import Embedder
+from app.llm.groq import GroqLLM
+from app.config.settings import settings
 
 WIB = timezone(timedelta(hours=7))
 USER_ID = "507090539"  # single-user bot (Rendy)
@@ -30,7 +32,11 @@ FOLLOWUP_PREDICATES = ("working_on", "building", "project", "progress",
 
 def create_core():
     llm = ClaudeLLM()
-    fast_llm = ClaudeLLM(model="claude-haiku-4-5-20251001")
+    # Cheap/mechanical work (extraction, proactive one-liners, job scoring,
+    # consolidation) runs on Groq's free tier; Haiku is the reliability fallback.
+    # Cuts the bulk of recurring Claude spend — main agent stays on Claude.
+    haiku = ClaudeLLM(model="claude-haiku-4-5-20251001")
+    fast_llm = GroqLLM(fallback=haiku) if settings.GROQ_API_KEY else haiku
 
     embedder = Embedder()  # semantic layer; no GEMINI_API_KEY → keyword-only
 
