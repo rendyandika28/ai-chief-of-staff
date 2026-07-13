@@ -19,4 +19,5 @@ dependencies = [
     "google-api-python-client>=2.198.0",
     "numpy>=2.0.2",
     "google-genai>=1.47.0",
+    "ddgs>=9.8.0",
 ]
