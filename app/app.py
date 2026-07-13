@@ -200,6 +200,44 @@ def create_core():
 
     watchers.register(conflict_watcher, 3600)  # tiap 1 jam
 
+    # Health watcher — bot jaga kesehatan dirinya. Alert Rendy kalau ada error
+    # BERULANG (bukan blip sekali). Gate ketat: cuma error yg muncul >=2x dlm 1 jam,
+    # signature baru (belum pernah di-alert), max 1 alert / 3 jam.
+    def health_watcher():
+        import json
+        from datetime import timezone as _tz
+        from app.lib.events import recent
+        seen_path = Path("memory/health_seen.json")
+        try:
+            state = json.loads(seen_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            state = {"signatures": [], "last_alert": ""}
+
+        now_utc = datetime.now(_tz.utc)
+        window = (now_utc - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+        counts = {}
+        for e in recent(200):
+            if e["kind"] == "error" and (e["ts"] or "") >= window:
+                sig = (e["detail"] or "")[:60]
+                counts[sig] = counts.get(sig, 0) + 1
+        recurring = {s for s, n in counts.items() if n >= 2}
+        new = recurring - set(state["signatures"])
+        if not new:
+            return None
+        # rate-limit: max 1 alert / 3 jam
+        if state["last_alert"] and state["last_alert"] > (now_utc - timedelta(hours=3)).isoformat():
+            return None
+        msg = agent.phrase(
+            "Kasih tau Rendy ada error yang muncul berulang di sistem lo sendiri, "
+            "ringkas & jujur, jangan bikin panik:\n- " + "\n- ".join(list(new)[:5]))
+        if msg:
+            state["signatures"] = list(set(state["signatures"]) | new)[-100:]
+            state["last_alert"] = now_utc.isoformat()
+            seen_path.write_text(json.dumps(state))
+        return msg
+
+    watchers.register(health_watcher, 900)  # tiap 15 menit
+
     # Morning brief — persistent daily task at 07:00 WIB, survives restarts.
     if not scheduler.has_pending("__morning_brief__"):
         run_at, interval = Scheduler.calc_daily("07:00")

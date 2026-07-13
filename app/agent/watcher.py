@@ -4,6 +4,8 @@ import logging
 import threading
 import time
 
+from app.lib.events import log_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,11 +31,18 @@ class WatcherManager:
         self._running = False
 
     def _loop(self, watcher, interval_seconds: int):
+        name = getattr(watcher, "__name__", "watcher")
+        last_err = None  # dedup: don't spam events.db when the same error repeats
         while self._running:
             try:
                 result = watcher()
                 if result and self.on_alert:
                     self.on_alert(result)
+                last_err = None  # recovered → next distinct error logs again
             except Exception as e:
-                logger.error(f"Watcher error: {e}")
+                logger.error(f"Watcher {name} error: {e}")
+                msg = f"{name}: {e}"
+                if msg != last_err:  # surface silent failures, once per distinct error
+                    log_event("error", f"watcher {msg}")
+                    last_err = msg
             time.sleep(interval_seconds)

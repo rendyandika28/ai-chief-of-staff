@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.lib.events import recent
+from app.lib.usage import today as usage_today
 from app.tools.job_hunt_tool import JOB_DB, STATUS_DB, build_cover_letter
 
 MEMORY_DIR = os.getenv("MEMORY_DIR", "memory")
@@ -162,6 +163,7 @@ def build_state() -> dict:
         "chat": chat,
         "memory": memory,
         "reminders": reminders,
+        "usage": usage_today(),  # {in_tokens, out_tokens, cost_usd, by_model}
     }
 
 
@@ -375,6 +377,7 @@ function render(s){
     ['Tool dipakai · 24j', s.stats.tools_24h, 'azure'],
     ['Reminder aktif', s.stats.reminders, 'amber'],
     ['Fakta diingat', s.stats.facts, 'mint'],
+    ['Biaya hari ini', '$'+(s.usage?s.usage.cost_usd.toFixed(2):'0.00'), 'txt'],
   ];
   document.getElementById('tiles').innerHTML = tiles.map(([l,v,c])=>`
     <div class="rounded-xl bg-surface border border-line px-4 py-3">

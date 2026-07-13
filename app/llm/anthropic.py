@@ -4,6 +4,7 @@ from anthropic import (Anthropic, APIConnectionError, APITimeoutError,
                        APIStatusError, InternalServerError, RateLimitError)
 
 from app.config.settings import settings
+from app.lib import usage
 
 _RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504, 529}
 
@@ -62,6 +63,9 @@ class ClaudeLLM:
                                 produced = True
                                 yield text
                             final = stream.get_final_message()
+                        if final.usage:
+                            usage.record(self.model, final.usage.input_tokens,
+                                         final.usage.output_tokens)
                         break
                     except Exception as e:
                         attempt += 1
@@ -109,6 +113,7 @@ class ClaudeLLM:
         return kwargs
 
     def _extract_text(self, response) -> str:
+        usage.record(self.model, response.usage.input_tokens, response.usage.output_tokens)
         for block in response.content:
             if hasattr(block, 'text'):
                 text = block.text
