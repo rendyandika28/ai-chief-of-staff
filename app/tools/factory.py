@@ -10,6 +10,7 @@ from app.tools.polymarket_tool import PolymarketTool
 from app.tools.doc_tool import DocTool
 from app.tools.calendar_tool import CalendarTool
 from app.tools.web_research_tool import WebResearchTool
+from app.tools.browser_tool import BrowserTool
 
 
 class RememberTool:
@@ -60,6 +61,7 @@ def load_tools(scheduler=None, profile=None, knowledge_graph=None, llm=None,
         "doc_gen": DocTool(),
         "calendar": CalendarTool(),
         "web_research": WebResearchTool(),
+        "browse": BrowserTool(),
     }
     if scheduler:
         tools["reminder"] = ReminderTool(scheduler)
