@@ -32,7 +32,7 @@ JOB_DB = Path(os.getenv("MEMORY_DIR", "memory")) / "jobs.json"
 STATUS_DB = Path(os.getenv("MEMORY_DIR", "memory")) / "job_status.json"
 SAVED_CAP = 50    # max lowongan 'saved' (belum ditindak) yg disimpen
 PRUNE_DAYS = 30   # umur lowongan saved sebelum di-cek masih hidup gak
-ACTIONED = ("applied", "interview", "offer", "rejected")  # keluar kuota, disimpen buat riwayat
+ACTIONED = ("drafted", "applied", "interview", "offer", "rejected")  # keluar kuota, disimpen buat riwayat
 
 # Judul diterima kalau ngandung salah satu sinyal frontend ini — dari stack CV Rendy
 # (React/Vue/Next/Nuxt/TS). Sengaja TANPA "javascript"/"typescript" telanjang (terlalu
@@ -498,27 +498,49 @@ class JobHuntTool:
         except json.JSONDecodeError:
             return []
 
-    def _save_jobs(self, jobs: list):
+    @staticmethod
+    def _norm_url(url: str) -> str:
+        """Kunci dedup URL: lowercase, buang query/fragment (tracking param LinkedIn beda-beda
+        buat post yg sama)."""
+        return (url or "").lower().split("?")[0].split("#")[0].rstrip("/")
+
+    def _save_jobs(self, jobs: list) -> list:
+        """Simpen job baru, return list id yg beneran kesimpen (dedup di-skip).
+
+        Dedup: sumber extension (linkedin-ext) by URL — judul post generik ("Frontend
+        Developer") bisa sama antar perusahaan, URL LinkedIn unik. Sumber API tetep by
+        title (behavior lama, URL antar-agregator beda buat lowongan yg sama)."""
         JOB_DB.parent.mkdir(parents=True, exist_ok=True)
         existing = self._load_jobs()
-        existing_titles = {j.get("title", "").lower() for j in existing}
+        seen_titles = {j.get("title", "").lower() for j in existing}
+        seen_urls = {self._norm_url(j.get("url")) for j in existing if j.get("url")}
         # id monotonik (max+1), BUKAN len — prune bisa bikin len < id tertinggi → tabrakan.
         next_id = max((j.get("id", -1) for j in existing), default=-1) + 1
+        saved_ids = []
         for job in jobs:
             title = job.get("title", "")
-            if title.lower() in existing_titles:
+            url_key = self._norm_url(job.get("url"))
+            if job.get("source") == "linkedin-ext" and url_key:
+                if url_key in seen_urls:
+                    continue
+            elif title.lower() in seen_titles:
                 continue
             existing.append({
                 "id": next_id, "title": title,
                 "company": job.get("company", ""), "location": job.get("location", ""),
                 "url": job.get("url", ""), "source": job.get("source", ""),
+                "email": job.get("email", ""),
                 "scraped_at": job.get("scraped_at", ""), "reason": job.get("reason", ""),
                 "score": job.get("score", 0), "status": job.get("status", ""),
             })
-            existing_titles.add(title.lower())  # dedup dalam batch yg sama juga
+            seen_titles.add(title.lower())  # dedup dalam batch yg sama juga
+            if url_key:
+                seen_urls.add(url_key)
+            saved_ids.append(next_id)
             next_id += 1
         existing = self._prune_and_cap(existing)
         JOB_DB.write_text(json.dumps(existing, indent=2, ensure_ascii=False))
+        return saved_ids
 
     def _prune_and_cap(self, jobs: list) -> list:
         """Retensi lowongan:
@@ -642,6 +664,29 @@ def _demo():
     assert {j["id"] for j in res2} == {3}, res2  # cap → simpen skor tertinggi
     SAVED_CAP = 50
 
+    # _save_jobs: linkedin-ext dedup by URL (judul generik boleh sama), sumber API dedup
+    # by title (lama). Return ids yg kesimpen. email ke-persist. JOB_DB dialihkan ke tmp.
+    global JOB_DB
+    import tempfile
+    JOB_DB = Path(tempfile.mkdtemp()) / "jobs.json"
+    t = JobHuntTool()
+    ids1 = t._save_jobs([
+        {"title": "Frontend Developer", "source": "linkedin-ext",
+         "url": "https://x.com/posts/1?utm=a", "email": "hr@a.com", "score": 80},
+        {"title": "Frontend Developer", "source": "linkedin-ext",   # judul sama, URL beda → simpen
+         "url": "https://x.com/posts/2", "score": 80},
+    ])
+    assert ids1 == [0, 1], ids1
+    ids2 = t._save_jobs([
+        {"title": "Beda Judul", "source": "linkedin-ext",           # URL sama (query dibuang) → skip
+         "url": "https://x.com/posts/1", "score": 80},
+        {"title": "Frontend Developer", "source": "remotive",       # API source, title sama → skip
+         "url": "https://y.com/j/9", "score": 80},
+    ])
+    assert ids2 == [], ids2
+    assert t._load_jobs()[0]["email"] == "hr@a.com"
+    assert "drafted" in ACTIONED  # drafted = actioned → gak kena cap/prune
+
     # match_score: role frontend + stack + remote lolos ≥80; junior/off-stack gugur
     prof = {"job_preferences": {"roles": ["frontend engineer", "react developer"]}}
     strong = match_score({"title": "Senior Frontend Engineer",
@@ -664,7 +709,7 @@ def _demo():
     JobHuntTool(llm=_FakeLLM())._llm_rescore(jl, prof)
     assert jl[0]["score"] == 91 and "cocok" in jl[0]["reason"], jl
 
-    print(f"OK: filter {len(keep)} keep / {len(drop)} drop · mojibake · prune · "
+    print(f"OK: filter {len(keep)} keep / {len(drop)} drop · mojibake · prune · save/dedup · "
           f"match(strong={strong},weak={weak},offstack={offstack}) · llm-rescore")
 
 

@@ -14,16 +14,19 @@ import secrets
 import sqlite3
 from datetime import datetime, timezone
 
-from fastapi import Body, Depends, FastAPI, HTTPException, status
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.lib.events import recent
 from app.lib.usage import today as usage_today
-from app.tools.job_hunt_tool import JOB_DB, STATUS_DB, build_cover_letter
+from app.tools import gmail_draft
+from app.tools.job_hunt_tool import (
+    JOB_DB, STATUS_DB, MATCH_THRESHOLD, WIB, JobHuntTool, build_cover_letter, match_score,
+)
 
 MEMORY_DIR = os.getenv("MEMORY_DIR", "memory")
-STAGES = ("saved", "applied", "interview", "offer", "rejected")  # 'saved' = default (gak ada entri)
+STAGES = ("saved", "drafted", "applied", "interview", "offer", "rejected")  # 'saved' = default (gak ada entri)
 
 
 def _load_jobs() -> list:
@@ -188,16 +191,10 @@ def api_set_stage(job_id: int, payload: dict = Body(...), _: bool = Depends(auth
     stage = (payload or {}).get("stage", "")
     if stage not in STAGES:
         raise HTTPException(400, "stage gak valid")
-    ids = {j.get("id") for j in _load_jobs()}
-    if job_id not in ids:
+    if job_id not in {j.get("id") for j in _load_jobs()}:
         raise HTTPException(404, "lowongan gak ada")
-    status = {k: v for k, v in _load_status().items() if k.isdigit() and int(k) in ids}  # buang orphan
-    if stage == "saved":
-        status.pop(str(job_id), None)  # balik default = hapus entri
-    else:
-        status[str(job_id)] = {"stage": stage, "updated_at": datetime.now(timezone.utc).isoformat()}
     try:
-        STATUS_DB.write_text(json.dumps(status, indent=2, ensure_ascii=False))
+        _write_stage(job_id, stage)
     except OSError:
         raise HTTPException(500, "gagal nulis status — mount dashboard masih read-only?")
     return JSONResponse({"ok": True, "stage": stage})
@@ -209,6 +206,131 @@ def api_cover_letter(job_id: int, _: bool = Depends(auth)):
     if job is None:
         raise HTTPException(404, "Lowongan gak ketemu")
     return JSONResponse({"text": build_cover_letter(job, _load_profile())})
+
+
+# ── Extension API (LinkedIn Job Assist) ─────────────────────────────────────
+# Spec: docs/superpowers/specs/2026-07-13-linkedin-job-assist-design.md
+
+_basic_optional = HTTPBasic(auto_error=False)
+
+
+def ext_auth(x_api_token: str = Header(""),
+             cred: HTTPBasicCredentials = Depends(_basic_optional)) -> bool:
+    """Token extension (X-API-Token) ATAU basic auth dashboard — dua-duanya sah.
+    Extension pake token; tombol di dashboard pake sesi basic yang udah ada."""
+    tok = os.getenv("EXT_API_TOKEN", "")
+    if tok and x_api_token and secrets.compare_digest(x_api_token, tok):
+        return True
+    if cred is not None:
+        return auth(cred)  # raise 401 sendiri kalau salah
+    if not tok:
+        raise HTTPException(503, "EXT_API_TOKEN belum di-set di environment")
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token invalid")
+
+
+def _fast_llm():
+    """GroqLLM buat rescore — lazy, opsional. Gak ada key/lib → None (heuristik doang)."""
+    try:
+        from app.llm.groq import GroqLLM
+        llm = GroqLLM()
+        return llm if llm._client else None
+    except Exception:
+        return None
+
+
+def _write_stage(job_id: int, stage: str):
+    ids = {j.get("id") for j in _load_jobs()}
+    status_map = {k: v for k, v in _load_status().items() if k.isdigit() and int(k) in ids}
+    if stage == "saved":
+        status_map.pop(str(job_id), None)  # balik default = hapus entri
+    else:
+        status_map[str(job_id)] = {"stage": stage, "updated_at": datetime.now(timezone.utc).isoformat()}
+    STATUS_DB.write_text(json.dumps(status_map, indent=2, ensure_ascii=False))
+
+
+@app.post("/api/jobs/ingest")
+def api_ingest(payload: dict = Body(...), _: bool = Depends(ext_auth)):
+    """Batch dari extension: skor semua, simpen yang >= threshold. Anti asal-apply."""
+    items = (payload or {}).get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, "items kosong")
+    profile = _load_profile()
+    now = datetime.now(WIB).isoformat()
+    jobs = [{
+        "title": (it.get("title") or "").strip()[:200],
+        "company": (it.get("company") or "").strip()[:120],
+        "location": (it.get("location") or "Remote").strip()[:120],
+        "url": (it.get("url") or "").strip(),
+        "email": (it.get("email") or "").strip()[:200],
+        "source": "linkedin-ext",
+        "description": (it.get("body") or "")[:4000],
+        "scraped_at": now, "reason": "",
+    } for it in items[:100] if (it.get("title") or "").strip()]
+
+    for j in jobs:
+        j["score"] = match_score(j, profile)
+    llm = _fast_llm()
+    if llm:
+        JobHuntTool(llm=llm)._llm_rescore(jobs, profile)  # gagal → skor heuristik bertahan
+
+    tool = JobHuntTool()
+    results = []
+    for j in jobs:
+        desc = j.pop("description", None)
+        if j["score"] < MATCH_THRESHOLD:
+            results.append({"url": j["url"], "stored": False, "score": j["score"], "job_id": None})
+            continue
+        # per-job save biar dapet mapping url→id (dedup di dalem _save_jobs by URL)
+        saved = tool._save_jobs([j])
+        results.append({"url": j["url"], "stored": bool(saved), "score": j["score"],
+                        "job_id": saved[0] if saved else None})
+        _ = desc  # transient, gak disimpen
+    return JSONResponse({"results": results})
+
+
+@app.post("/api/drafts")
+def api_create_draft(payload: dict = Body(...), _: bool = Depends(ext_auth)):
+    """Bikin Gmail draft (cover letter + CV) buat 1 job. Semi-auto: Rendy Send manual."""
+    job_id = (payload or {}).get("job_id")
+    if not isinstance(job_id, int):
+        raise HTTPException(400, "job_id harus angka")
+    jobs = _load_jobs()
+    job = next((j for j in jobs if j.get("id") == job_id), None)
+    if job is None:
+        raise HTTPException(404, "lowongan gak ada")
+    if not job.get("email"):
+        raise HTTPException(400, "job ini gak punya email — apply manual via URL")
+    if _stage_of(_load_status(), job_id) == "drafted":
+        raise HTTPException(409, "udah didraft — cek folder Draft Gmail")
+
+    profile = _load_profile()
+    try:
+        draft_id = gmail_draft.create_draft(
+            to=job["email"],
+            subject=gmail_draft.subject_for(job, profile),
+            body=build_cover_letter(job, profile),
+            cv_path=profile.get("resume_path", ""),
+        )
+    except FileNotFoundError:
+        raise HTTPException(502, "token Gmail belum ada — jalanin scripts/google_auth.py pribadi gmail")
+    except Exception as e:
+        raise HTTPException(502, f"Gmail API gagal: {e}")  # job utuh, bisa apply manual
+
+    job["gmail_draft_id"] = draft_id
+    try:
+        JOB_DB.write_text(json.dumps(jobs, indent=2, ensure_ascii=False))
+        _write_stage(job_id, "drafted")
+    except OSError:
+        raise HTTPException(500, "draft kebuat tapi gagal nulis status — mount read-only?")
+    return JSONResponse({"ok": True, "job_id": job_id, "gmail_draft_id": draft_id})
+
+
+@app.get("/api/drafts")
+def api_list_drafts(_: bool = Depends(ext_auth)):
+    status_map = _load_status()
+    drafts = [dict(j, stage="drafted") for j in _load_jobs()
+              if _stage_of(status_map, j.get("id")) == "drafted"]
+    return JSONResponse({"total": len(drafts), "drafts": drafts})
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -231,7 +353,7 @@ tailwind.config = { theme: { extend: {
   colors: {
     ink:'#0B0E14', surface:'#12171F', surface2:'#171D27', line:'#232B37',
     txt:'#E7ECF3', muted:'#7C8798',
-    mint:'#6EE7C7', amber:'#F4B740', coral:'#F26D6D', azure:'#83A9F5',
+    mint:'#6EE7C7', amber:'#F4B740', coral:'#F26D6D', azure:'#83A9F5', lilac:'#B79DF0',
   },
   fontFamily:{ display:['"Space Grotesk"','sans-serif'], body:['Inter','sans-serif'], mono:['"IBM Plex Mono"','monospace'] },
 }}}
@@ -427,9 +549,10 @@ function render(s){
 
 // ---- Lowongan ----
 function matchColor(s){ return s>=90?'mint':s>=75?'amber':'muted'; }
-const STAGES = ['saved','applied','interview','offer','rejected'];
+const STAGES = ['saved','drafted','applied','interview','offer','rejected'];
 const STAGE_ON = {
   saved:'bg-line text-txt border-muted/50',
+  drafted:'bg-lilac/20 text-lilac border-lilac/50',
   applied:'bg-azure/20 text-azure border-azure/50',
   interview:'bg-amber/20 text-amber border-amber/50',
   offer:'bg-mint/20 text-mint border-mint/50',
@@ -463,6 +586,8 @@ function jobCard(j){
       <div class="flex flex-col items-end gap-1 shrink-0">
         <a href="${esc(url)}" target="_blank" rel="noopener" class="text-[11px] font-mono text-azure hover:underline">apply ↗</a>
         <button onclick="toggleCover(${j.id}, this)" class="text-[11px] font-mono text-mint hover:underline">cover letter</button>
+        ${j.email && stage!=='drafted' ? `<button onclick="draftEmail(${j.id}, this)" class="text-[11px] font-mono text-lilac hover:underline">✉ draft email</button>`:''}
+        ${j.gmail_draft_id ? `<span class="text-[10px] font-mono text-lilac/70">di Draft Gmail ✓</span>`:''}
       </div>
     </div>
     <div class="flex flex-wrap gap-1 mt-2">${buttons}</div>
@@ -475,11 +600,19 @@ async function loadJobs(){
     const d = await r.json();
     const c = d.counts||{};
     document.getElementById('jobcount').textContent =
-      `${d.total} lowongan · Saved ${c.saved||0} · Applied ${c.applied||0} · Interview ${c.interview||0} · Offer ${c.offer||0} · Rejected ${c.rejected||0}`;
+      `${d.total} lowongan · Saved ${c.saved||0} · Drafted ${c.drafted||0} · Applied ${c.applied||0} · Interview ${c.interview||0} · Offer ${c.offer||0} · Rejected ${c.rejected||0}`;
     const box = document.getElementById('jobs');
     box.innerHTML = d.jobs.length ? d.jobs.map(jobCard).join('')
       : '<div class="text-muted text-sm px-2 py-6 text-center">Belum ada lowongan.</div>';
   }catch(e){}
+}
+async function draftEmail(id, btn){
+  btn.disabled = true; btn.textContent = 'membuat…';
+  try{
+    const r = await fetch('/api/drafts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); alert(e.detail||'gagal bikin draft'); btn.disabled=false; btn.textContent='✉ draft email'; return; }
+    loadJobs(); // stage → drafted, tombol ilang, badge muncul
+  }catch(e){ alert('gagal bikin draft'); btn.disabled=false; btn.textContent='✉ draft email'; }
 }
 async function toggleCover(id, btn){
   const pre = document.getElementById('cl-'+id);
