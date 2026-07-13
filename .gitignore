@@ -28,3 +28,4 @@ memory/cctv_*.png
 memory/cctv_*.mp4
 memory/video_*/
 data/
+memory/lessons.db

@@ -19,20 +19,28 @@ WIB = timezone(timedelta(hours=7))
 _FACTWORTHY = re.compile(
     r"\b(kerja|kantor|proyek|project|bangun|ngerjain|garap|belajar|"
     r"suka|prefer|benci|pindah|pake|pakai|goal|target|deadline|"
-    r"tim|klien|client|nama|tinggal|domisili|jabatan|posisi|role|lagi)\b",
+    r"tim|klien|client|nama|tinggal|domisili|jabatan|posisi|role|lagi|"
+    # correction/preference signals → so lessons get captured
+    r"jangan|kepanjangan|kependekan|kepanjang|lain kali|mending|harusnya|"
+    r"terlalu|gausah|jgn|singkat|ringkas|to the point)\b",
     re.IGNORECASE,
 )
 
 _PROMPT = (
-    "Hari ini {today} (timezone WIB). Dari SATU pesan Rendy, keluarin dua hal:\n\n"
+    "Hari ini {today} (timezone WIB). Dari SATU pesan Rendy, keluarin tiga hal:\n\n"
     "1. loops — hal yang butuh DITINDAK Rendy nanti (komitmen, tugas, deadline, "
     "keputusan yang harus diambil, hal personal yang harus diurus).\n"
-    "2. facts — fakta DURABLE soal Rendy (kerjaan, proyek, preferensi, identitas).\n\n"
+    "2. facts — fakta DURABLE soal Rendy (kerjaan, proyek, preferensi, identitas).\n"
+    "3. lessons — CUMA kalau Rendy MENGOREKSI cara kerja bot atau nyatain PREFERENSI "
+    "cara-kerja ('kepanjangan', 'jangan gitu', 'lain kali to the point', 'gua lebih "
+    "suka X'). Tulis 1 kalimat pelajaran dari sudut 'Bot harus ...'. "
+    "Obrolan biasa / ga ada koreksi → [].\n\n"
     "Balas HANYA JSON object: "
-    '{{"loops": [...], "facts": [...]}}\n'
+    '{{"loops": [...], "facts": [...], "lessons": [...]}}\n'
     'Tiap loop: {{"text": "<ringkas, sudut pandang Rendy>", '
     '"due_at": "<ISO date/datetime WIB atau null>", "kind": "work|personal|decision"}}\n'
-    'Tiap fact: {{"subject": "Rendy", "predicate": "<SATU dari daftar>", "object": "<nilai>"}}\n\n'
+    'Tiap fact: {{"subject": "Rendy", "predicate": "<SATU dari daftar>", "object": "<nilai>"}}\n'
+    'Tiap lesson: string kalimat, contoh: "Bot harus bikin brief max 3 kalimat".\n\n'
     "PREDICATE WAJIB salah satu ini (JANGAN ngarang di luar daftar):\n"
     "  working_on, building, project, deadline, goal, planning, learning,\n"
     "  works_at, role_is, prefers, dislikes, uses, knows, located_in, contact_is\n\n"
@@ -56,10 +64,10 @@ class MemoryExtractor:
         return bool(_actionable(message) or _FACTWORTHY.search(message or ""))
 
     def extract(self, message: str):
-        """One message → (loops: list[dict], facts: list[dict]). Never raises."""
+        """One message → (loops, facts, lessons), all list. Never raises."""
         try:
             if not self._gate(message):
-                return [], []
+                return [], [], []
             now = datetime.now(WIB)
             sys = _PROMPT.format(
                 today=now.strftime("%A, %d %B %Y"), iso=now.date().isoformat())
@@ -70,16 +78,18 @@ class MemoryExtractor:
             )
             data = extract_json(raw)
             if not isinstance(data, dict):
-                return [], []
+                return [], [], []
             loops = data.get("loops")
             facts = data.get("facts")
-            # ponytail: one prompt does two jobs to save a call; if fact quality
-            # sags, split back into two focused calls (higher cost).
+            lessons = data.get("lessons")
+            # ponytail: one prompt does three jobs to save calls; if quality
+            # sags, split into focused calls (higher cost).
             return (loops if isinstance(loops, list) else [],
-                    facts if isinstance(facts, list) else [])
+                    facts if isinstance(facts, list) else [],
+                    [s for s in (lessons or []) if isinstance(s, str) and s.strip()])
         except Exception as e:
             log_event("error", f"extractor: {e}")
-            return [], []
+            return [], [], []
 
 
 def _demo():
@@ -90,26 +100,31 @@ def _demo():
         def chat(self, messages, max_tokens=500):
             _FakeLLM.calls += 1
             return ('{"loops": [{"text": "kirim proposal", "due_at": null, "kind": "work"}], '
-                    '"facts": [{"subject": "Rendy", "predicate": "building", "object": "AI chief"}]}')
+                    '"facts": [{"subject": "Rendy", "predicate": "building", "object": "AI chief"}], '
+                    '"lessons": ["Bot harus bikin brief max 3 kalimat"]}')
 
     ex = MemoryExtractor(_FakeLLM())
 
     # gate: idle chatter → no LLM call, empty result
     before = _FakeLLM.calls
-    assert ex.extract("santai aja lah hari ini") == ([], [])
+    assert ex.extract("santai aja lah hari ini") == ([], [], [])
     assert _FakeLLM.calls == before, "idle chatter must not hit the LLM"
 
-    # actionable/factworthy → LLM runs, both lists returned
-    loops, facts = ex.extract("gua lagi bangun AI chief, harus kirim proposal")
-    assert loops and facts, f"should extract both, got {loops} / {facts}"
+    # actionable/factworthy → LLM runs, all three lists returned
+    loops, facts, lessons = ex.extract("gua lagi bangun AI chief, harus kirim proposal")
+    assert loops and facts, f"should extract loops+facts, got {loops} / {facts}"
     assert facts[0]["predicate"] == "building"
+    assert lessons and "brief" in lessons[0], f"should extract lesson, got {lessons}"
 
-    # malformed JSON → ([], []), no raise
+    # correction message passes the gate (so lessons aren't lost)
+    assert ex._gate("kepanjangan bro, lain kali singkat aja"), "corrections must pass the gate"
+
+    # malformed JSON → ([], [], []), no raise
     class _BadLLM:
         def chat(self, messages, max_tokens=500):
             return "not json at all"
 
-    assert MemoryExtractor(_BadLLM()).extract("harus submit besok") == ([], [])
+    assert MemoryExtractor(_BadLLM()).extract("harus submit besok") == ([], [], [])
 
     # predicate vocabulary is exported and non-empty (extractor prompt relies on it)
     assert "building" in VALID_PREDICATES

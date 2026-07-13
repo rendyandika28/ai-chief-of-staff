@@ -25,7 +25,7 @@ class Agent:
 
     def __init__(self, llm, memory, scheduler=None,
                  long_term_memory=None, knowledge_graph=None, fast_llm=None,
-                 open_loops=None, extractor=None, embedder=None):
+                 open_loops=None, extractor=None, embedder=None, lessons=None):
         self.llm = llm
         self.fast_llm = fast_llm or llm  # cheap model for proactive one-liners
         self.memory = memory
@@ -34,6 +34,7 @@ class Agent:
         self.open_loops = open_loops
         self.extractor = extractor
         self.embedder = embedder
+        self.lessons = lessons
         self.profile = Profile()
         self.tools = load_tools(scheduler, self.profile, knowledge_graph,
                                 self.fast_llm, open_loops)
@@ -125,11 +126,14 @@ class Agent:
         # Merged extraction: ONE Haiku call → open loops + KG facts. Falls back
         # to open_loops.ingest only if no extractor is wired.
         if self.extractor:
-            loops, facts = self.extractor.extract(message)
+            loops, facts, lessons = self.extractor.extract(message)
             if self.open_loops:
                 self.open_loops.store(user_id, loops)
             if self.knowledge_graph:
                 self.knowledge_graph.store_facts(user_id, facts)
+            if self.lessons:
+                for lesson in lessons:
+                    self.lessons.add(user_id, lesson)
         elif self.open_loops:
             self.open_loops.ingest(user_id, message)  # best-effort, never raises
 
@@ -154,6 +158,13 @@ class Agent:
                 context_lines.append(f"- Dulu lo tanya: {m['user']} → jawab: {m['assistant']}")
         if context_lines:
             dynamic += "\n\n## Yang lo inget soal ini:\n" + "\n".join(context_lines)
+
+        # Learned preferences/corrections — apply them to how you respond.
+        if self.lessons:
+            lessons = self.lessons.for_context(user_id, qvec, message)
+            if lessons:
+                dynamic += "\n\n## Pelajaran soal cara kerja (terapin):\n" + \
+                    "\n".join(f"- {L}" for L in lessons)
 
         return [
             {"type": "text", "text": self._static_prompt,

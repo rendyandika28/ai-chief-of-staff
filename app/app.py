@@ -10,6 +10,7 @@ from app.agent.memory import Memory
 from app.agent.agent import Agent
 from app.agent.scheduler import Scheduler
 from app.memory.long_term import LongTermMemory
+from app.memory.lessons import Lessons
 from app.os.knowledge_graph import KnowledgeGraph
 from app.agent.watcher import WatcherManager
 from app.agent.open_loops import OpenLoops
@@ -45,15 +46,17 @@ def create_core():
     scheduler = Scheduler()
     knowledge_graph = KnowledgeGraph(embedder=embedder)
     open_loops = OpenLoops(fast_llm)
-    extractor = MemoryExtractor(fast_llm)  # merged loop+fact extraction, 1 call/turn
+    lessons = Lessons(embedder=embedder)  # learned corrections/preferences
+    extractor = MemoryExtractor(fast_llm)  # merged loop+fact+lesson extraction, 1 call/turn
 
     # Embed anything stored before the embedder existed. No-op when off; cheap.
     knowledge_graph.backfill_embeddings()
     long_term.backfill_embeddings()
+    lessons.backfill_embeddings()
 
     agent = Agent(llm, memory, scheduler, long_term, knowledge_graph,
                   fast_llm=fast_llm, open_loops=open_loops,
-                  extractor=extractor, embedder=embedder)
+                  extractor=extractor, embedder=embedder, lessons=lessons)
 
     watchers = WatcherManager()
 
