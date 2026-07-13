@@ -92,11 +92,19 @@ class OpenLoops:
                 max_tokens=400,
             )
             data = extract_json(raw)
-            if not isinstance(data, list):
-                return
+            if isinstance(data, list):
+                self.store(user_id, data)
+        except Exception as e:
+            log_event("error", f"open_loops.ingest: {e}")
+
+    def store(self, user_id: str, loops: list):
+        """Insert new open loops (dedup by open text). Used by the merged
+        extractor and by the legacy ingest path. Never raises."""
+        try:
+            now = datetime.now(WIB)
             existing = {t.lower() for (t,) in self._db.fetch(
                 "SELECT text FROM loops WHERE user_id=? AND status='open'", (user_id,))}
-            for item in data:
+            for item in loops or []:
                 if not isinstance(item, dict):
                     continue
                 text = (item.get("text") or "").strip()
@@ -110,7 +118,7 @@ class OpenLoops:
                 )
                 existing.add(text.lower())
         except Exception as e:
-            log_event("error", f"open_loops.ingest: {e}")
+            log_event("error", f"open_loops.store: {e}")
 
     # ---- surface -----------------------------------------------------------
     def _open_rows(self, user_id: str):

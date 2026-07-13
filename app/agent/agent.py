@@ -15,18 +15,25 @@ MEDIA_RE = re.compile(r'\[(?:VIDEO|IMAGE|FILE):.*?\]')
 logger = logging.getLogger(__name__)
 
 
+def _worth_embedding(message: str) -> bool:
+    """Skip embedding trivial acks/one-word replies — saves query calls."""
+    return len((message or "").split()) >= 3
+
+
 class Agent:
     """Memory → context → one Claude call (native tools, in-persona) → stream."""
 
     def __init__(self, llm, memory, scheduler=None,
                  long_term_memory=None, knowledge_graph=None, fast_llm=None,
-                 open_loops=None):
+                 open_loops=None, extractor=None, embedder=None):
         self.llm = llm
         self.fast_llm = fast_llm or llm  # cheap model for proactive one-liners
         self.memory = memory
         self.long_term = long_term_memory
         self.knowledge_graph = knowledge_graph
         self.open_loops = open_loops
+        self.extractor = extractor
+        self.embedder = embedder
         self.profile = Profile()
         self.tools = load_tools(scheduler, self.profile, knowledge_graph,
                                 self.fast_llm, open_loops)
@@ -114,7 +121,16 @@ class Agent:
 
         if self.long_term:
             self.long_term.add(user_id, message, full_text)
-        if self.open_loops:
+
+        # Merged extraction: ONE Haiku call → open loops + KG facts. Falls back
+        # to open_loops.ingest only if no extractor is wired.
+        if self.extractor:
+            loops, facts = self.extractor.extract(message)
+            if self.open_loops:
+                self.open_loops.store(user_id, loops)
+            if self.knowledge_graph:
+                self.knowledge_graph.store_facts(user_id, facts)
+        elif self.open_loops:
             self.open_loops.ingest(user_id, message)  # best-effort, never raises
 
     def _system_blocks(self, user_id: str, message: str) -> list:
@@ -122,13 +138,19 @@ class Agent:
         now = datetime.now(WIB)
         dynamic = f"HARI INI: {now.strftime('%A, %d %B %Y jam %H:%M WIB')}"
 
+        # Embed the query ONCE, reuse for both KG and long-term recall. Skip
+        # trivial acks to save calls; None → both stores fall back to keyword.
+        qvec = None
+        if self.embedder and _worth_embedding(message):
+            qvec = self.embedder.embed_one(message, task_type="RETRIEVAL_QUERY")
+
         context_lines = []
         if self.knowledge_graph:
-            kg = self.knowledge_graph.context_for(user_id, message)
+            kg = self.knowledge_graph.context_for(user_id, message, qvec)
             if kg:
                 context_lines.append(kg)
         if self.long_term:
-            for m in self.long_term.search(user_id, message, k=3):
+            for m in self.long_term.search(user_id, message, qvec, k=3):
                 context_lines.append(f"- Dulu lo tanya: {m['user']} → jawab: {m['assistant']}")
         if context_lines:
             dynamic += "\n\n## Yang lo inget soal ini:\n" + "\n".join(context_lines)

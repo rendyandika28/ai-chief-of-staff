@@ -14,7 +14,9 @@ from app.os.knowledge_graph import KnowledgeGraph
 from app.agent.watcher import WatcherManager
 from app.agent.open_loops import OpenLoops
 from app.agent.consolidate import MemoryConsolidator
+from app.agent.extractor import MemoryExtractor
 from app.llm.anthropic import ClaudeLLM
+from app.llm.embedder import Embedder
 
 WIB = timezone(timedelta(hours=7))
 USER_ID = "507090539"  # single-user bot (Rendy)
@@ -28,14 +30,22 @@ def create_core():
     llm = ClaudeLLM()
     fast_llm = ClaudeLLM(model="claude-haiku-4-5-20251001")
 
+    embedder = Embedder()  # semantic layer; no GEMINI_API_KEY → keyword-only
+
     memory = Memory()
-    long_term = LongTermMemory()
+    long_term = LongTermMemory(embedder=embedder)
     scheduler = Scheduler()
-    knowledge_graph = KnowledgeGraph()
+    knowledge_graph = KnowledgeGraph(embedder=embedder)
     open_loops = OpenLoops(fast_llm)
+    extractor = MemoryExtractor(fast_llm)  # merged loop+fact extraction, 1 call/turn
+
+    # Embed anything stored before the embedder existed. No-op when off; cheap.
+    knowledge_graph.backfill_embeddings()
+    long_term.backfill_embeddings()
 
     agent = Agent(llm, memory, scheduler, long_term, knowledge_graph,
-                  fast_llm=fast_llm, open_loops=open_loops)
+                  fast_llm=fast_llm, open_loops=open_loops,
+                  extractor=extractor, embedder=embedder)
 
     watchers = WatcherManager()
 

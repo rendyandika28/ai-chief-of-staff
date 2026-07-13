@@ -26,7 +26,9 @@ class RememberTool:
         parts = [p.strip() for p in (input or "").split("|")]
         if len(parts) != 3 or not all(parts):
             return "Error: format harus subject|predicate|object"
-        self._kg.upsert(user_id, parts[0], parts[1], parts[2], 0.8)
+        # Route through store_facts → same vocabulary guard + supersede + embed.
+        self._kg.store_facts(user_id, [
+            {"subject": parts[0], "predicate": parts[1], "object": parts[2]}])
         return "(noted)"
 
 
