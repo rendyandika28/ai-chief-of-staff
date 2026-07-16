@@ -135,11 +135,15 @@ function findScrollable(el) {
   return null;
 }
 
+// Dua page beda scroller: content search = window/documentElement, feed SDUI =
+// <main> (window stuck 0). Dorong dua-duanya — yang beneran scroller yang gerak.
 function scrollFeed() {
+  window.scrollTo(0, document.body.scrollHeight); // halaman search
   const posts = document.querySelectorAll(`${SEL.sduiItem}, ${SEL.post}`);
   const last = posts[posts.length - 1];
   const sc = (last && findScrollable(last)) || document.querySelector("main") || document.scrollingElement;
-  if (sc) sc.scrollTop = sc.scrollHeight; // mentok bawah → trigger lazy-load batch berikut
+  if (sc) sc.scrollTop = sc.scrollHeight; // feed SDUI: mentok bawah → trigger lazy-load
+  last?.scrollIntoView({ block: "end" });  // belt-and-suspenders
 }
 
 async function autoScan(btn) {
@@ -197,14 +201,18 @@ function finish(btn, msg) {
   autoScan.running = false;
   btn.disabled = false;
   btn.textContent = msg;
-  setTimeout(() => (btn.textContent = "⌕ Auto-scan"), 8000);
+  setTimeout(() => (btn.textContent = "⊕ Scan lowongan"), 8000);
 }
 
-// Tombol floating — sekali per halaman.
-if (!document.getElementById("ljassist-btn")) {
+// Tombol floating — cuma di feed + content search, sekali per halaman.
+// ponytail: LinkedIn SPA, nav feed→search tanpa reload gak re-inject; Rendy buka
+// URL search langsung (document_idle fire) jadi OK. Upgrade: listen pushState.
+const RELEVANT_PAGE = /\/feed\/?$/.test(location.pathname)
+  || location.pathname.startsWith("/search/results/content/");
+if (RELEVANT_PAGE && !document.getElementById("ljassist-btn")) {
   const btn = document.createElement("button");
   btn.id = "ljassist-btn";
-  btn.textContent = "⌕ Auto-scan";
+  btn.textContent = "⊕ Scan lowongan";
   Object.assign(btn.style, {
     position: "fixed", bottom: "24px", right: "24px", zIndex: 99999,
     padding: "10px 16px", borderRadius: "24px", border: "none", cursor: "pointer",
